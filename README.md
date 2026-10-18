@@ -33,7 +33,10 @@ envoyée nulle part (tout reste en local ; tu vois le journal dans le popup).
 - Toujours **tout le site** : même si tu colles `https://mon-site.fr/compte`, c'est tout
   `mon-site.fr` qui est protégé.
 - Le blocage ne s'active **que lorsque tu es sur un site protégé**. Ailleurs : rien.
-- Lors d'un blocage : page avec **« Retour au site »** / **« Ouvrir quand même »**.
+- **Nouveaux onglets / pop-ups** : si un site protégé tente d'ouvrir un onglet ou une
+  pop-up vers un autre domaine (pubs, « Anonymous Proxy detected », etc.), il est **fermé
+  immédiatement** — il ne s'ouvre pas.
+- Lors d'un blocage (onglet courant) : page avec **« Retour au site »** / **« Ouvrir quand même »**.
 - Options : inclure les **sous-domaines**, et **exceptions** toujours autorisées.
 
 ---

@@ -16,6 +16,8 @@ importScripts("common.js");
 let anchors = {};
 // Dérogations "ouvrir quand même" : { [tabId]: url }.
 let bypass = {};
+// Nouveaux onglets ouverts depuis une zone protégée à surveiller : { [tabId]: baseHost }.
+let spawnedGuard = {};
 // Garde pour éviter deux envois simultanés.
 let syncing = false;
 
@@ -35,7 +37,30 @@ function setAnchor(tabId, url) {
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete anchors[tabId];
   delete bypass[tabId];
+  delete spawnedGuard[tabId];
   saveAnchors();
+});
+
+// Un site protégé tente d'ouvrir un NOUVEL onglet / pop-up (pub, "proxy
+// detected", etc.). S'il vise un autre site, on le ferme immédiatement.
+chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
+  const settings = await grGet();
+  const watched = settings.watchedLinks || [];
+  if (!settings.enabled || watched.length === 0) return;
+
+  const srcUrl = anchors[d.sourceTabId] ? anchors[d.sourceTabId].url : "";
+  const zone = grZoneForUrl(srcUrl, watched, settings);
+  if (!zone) return; // l'onglet d'origine n'est pas un site protégé
+
+  const targetHost = grHost(d.url);
+  if (isHttp(d.url) && !grStaysOnBase(targetHost, zone.host, settings)) {
+    // Pop-up vers un autre site : on ferme l'onglet avant qu'il ne charge.
+    try { await chrome.tabs.remove(d.tabId); } catch {}
+    return;
+  }
+  // URL pas encore connue (about:blank) ou même site : on surveille ce nouvel
+  // onglet, car ces pop-ups redirigent souvent juste après leur ouverture.
+  spawnedGuard[d.tabId] = zone.host;
 });
 
 function isHttp(url) {
@@ -61,6 +86,20 @@ chrome.webNavigation.onCommitted.addListener(async (d) => {
     setAnchor(d.tabId, d.url);
     await logVisit(d, settings, "bypass");
     return;
+  }
+
+  // Nouvel onglet ouvert depuis une zone protégée (pop-up) qui se met à charger :
+  // s'il part vers un autre site, on le ferme ; sinon on cesse de le surveiller.
+  if (spawnedGuard[d.tabId]) {
+    const guardHost = spawnedGuard[d.tabId];
+    const th = grHost(d.url);
+    if (!grStaysOnBase(th, guardHost, settings)) {
+      delete spawnedGuard[d.tabId];
+      await logVisit(d, settings, "blocked");
+      try { chrome.tabs.remove(d.tabId); } catch {}
+      return;
+    }
+    delete spawnedGuard[d.tabId];
   }
 
   const watched = settings.watchedLinks || [];
