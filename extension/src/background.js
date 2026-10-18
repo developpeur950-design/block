@@ -185,22 +185,47 @@ async function postToServer(kind, items, settings) {
 
   const headers = { "Content-Type": "application/json" };
   if (settings.serverKey) headers["Authorization"] = "Bearer " + settings.serverKey;
+  const body = JSON.stringify(envelope);
 
-  // Délai maximum : sans ça, une requête qui n'aboutit pas (serveur injoignable)
-  // resterait en suspens et bloquerait tous les envois suivants.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  // On essaie l'URL configurée (nom Tailscale). Si elle échoue — typiquement
+  // quand l'extension tourne sur le PC serveur lui-même, où le nom Tailscale
+  // peut être bloqué — on réessaie une fois en localhost. Séquentiel : un seul
+  // envoi aboutit, donc jamais de doublon.
   try {
-    const res = await fetch(settings.serverUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(envelope),
-      signal: ctrl.signal,
-    });
+    return await postOnce(settings.serverUrl, headers, body);
+  } catch (e) {
+    const local = localVariant(settings.serverUrl);
+    if (local) {
+      const res = await postOnce(local, headers, body);
+      console.log("[GR] (repli localhost utilisé)");
+      return res;
+    }
+    throw e;
+  }
+}
+
+// Un POST avec délai maximum (évite qu'une requête bloquée fige les envois).
+async function postOnce(url, headers, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(url, { method: "POST", headers, body, signal: ctrl.signal });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// Variante localhost d'une URL (pour le repli quand on est sur le PC serveur).
+function localVariant(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return null;
+    u.hostname = "127.0.0.1";
+    return u.toString();
+  } catch {
+    return null;
   }
 }
 
