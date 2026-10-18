@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Garde-Redirections",
+  "version": "1.0.0",
+  "description": "Bloque les redirections qui quittent le site courant et journalise vos visites vers votre propre serveur.",
+  "permissions": ["webNavigation", "tabs", "storage", "alarms", "history"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Garde-Redirections"
+  },
+  "options_page": "src/options.html"
+}

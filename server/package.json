@@ -1,0 +1,12 @@
+{
+  "name": "garde-redirections-serveur",
+  "version": "1.0.0",
+  "description": "Serveur de collecte (sans dépendance) pour l'extension Garde-Redirections.",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

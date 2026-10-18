@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Options — Garde-Redirections</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff; --fg: #1b1b1f; --muted: #6b7280;
+        --line: #e5e7eb; --accent: #2563eb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #1b1b1f; --fg: #e8e8ea; --muted: #9ca3af; --line: #33343a; --accent: #60a5fa; }
+      }
+      * { box-sizing: border-box; }
+      body {
+        max-width: 640px; margin: 0 auto; padding: 24px 16px;
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: var(--bg); color: var(--fg);
+      }
+      h1 { font-size: 20px; }
+      h2 { font-size: 15px; margin-top: 28px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+      label { display: block; margin: 14px 0 4px; font-weight: 600; }
+      .hint { color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+      input[type="text"], input[type="url"], input[type="number"], select, textarea {
+        width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+        border-radius: 7px; background: transparent; color: var(--fg); font: inherit;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      .check { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-weight: 600; }
+      .check input { width: auto; }
+      .bar { margin-top: 24px; display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        font: inherit; padding: 9px 14px; border: 1px solid var(--line);
+        background: transparent; color: var(--fg); border-radius: 8px; cursor: pointer;
+      }
+      button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+      #status { margin-top: 14px; color: var(--muted); min-height: 20px; }
+      code { background: color-mix(in srgb, var(--fg) 10%, transparent); padding: 1px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Garde-Redirections — Options</h1>
+
+    <h2>Blocage</h2>
+    <label class="check"><input type="checkbox" id="enabled" /> Extension active</label>
+
+    <label for="mode">Règle de blocage</label>
+    <select id="mode">
+      <option value="redirects">Bloquer les redirections automatiques hors du site courant</option>
+      <option value="same-domain">Rester sur le site courant (bloque aussi les clics externes)</option>
+      <option value="allowlist">N'autoriser que les domaines de la liste blanche</option>
+    </select>
+    <div class="hint">« Site courant » = le domaine de la page sur laquelle tu te trouves.</div>
+
+    <label class="check"><input type="checkbox" id="includeSubdomains" /> Considérer les sous-domaines comme le même site</label>
+
+    <label for="allowlist">Liste blanche (un domaine par ligne)</label>
+    <textarea id="allowlist" placeholder="exemple.com&#10;mon-site.fr"></textarea>
+    <div class="hint">Ces domaines sont toujours autorisés, quel que soit le mode.</div>
+
+    <h2>Journal &amp; serveur</h2>
+    <label class="check"><input type="checkbox" id="logging" /> Journaliser les sites visités</label>
+
+    <label for="serverUrl">URL de ton serveur</label>
+    <input type="url" id="serverUrl" placeholder="https://mon-serveur.exemple/collect" />
+    <div class="hint">Laisse vide pour tout garder en local. Les données sont envoyées en <code>POST</code> JSON.</div>
+
+    <label for="serverKey">Jeton d'authentification (optionnel)</label>
+    <input type="text" id="serverKey" placeholder="jeton secret" />
+    <div class="hint">Envoyé en en-tête <code>Authorization: Bearer &lt;jeton&gt;</code>.</div>
+
+    <label for="syncIntervalMin">Envoi automatique toutes les (minutes)</label>
+    <input type="number" id="syncIntervalMin" min="0" step="1" />
+    <div class="hint">0 = pas d'envoi automatique (tu enverras manuellement depuis le popup).</div>
+
+    <label for="maxLog">Nombre maximum d'entrées conservées localement</label>
+    <input type="number" id="maxLog" min="100" step="100" />
+
+    <div class="bar">
+      <button id="save" class="primary">Enregistrer</button>
+      <button id="test">Tester le serveur</button>
+      <button id="sendHistory">Envoyer tout l'historique maintenant</button>
+    </div>
+    <div id="status"></div>
+
+    <script src="common.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>
