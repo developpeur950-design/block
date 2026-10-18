@@ -49,61 +49,44 @@ function encodePNG(w, h, rgba) {
 }
 
 // --- Dessin (coordonnées normalisées 0..1), avec suréchantillonnage ---
-function inRoundRect(x, y) {
-  const min = 0.05, max = 0.95, r = 0.22;
-  if (x < min || x > max || y < min || y > max) return false;
-  const nx = x < min + r ? min + r : x > max - r ? max - r : x;
-  const ny = y < min + r ? min + r : y > max - r ? max - r : y;
-  const dx = x - nx, dy = y - ny;
-  return dx * dx + dy * dy <= r * r;
-}
-// Forme de bouclier (symbole de protection).
-function inShield(x, y) {
-  const cx = 0.5, top = 0.17, bot = 0.85, halfW = 0.27;
-  if (y < top || y > bot) return false;
-  const t = (y - top) / (bot - top); // 0 en haut, 1 à la pointe basse
-  let w;
-  if (t < 0.58) w = 1;
-  else w = 1 - (t - 0.58) / 0.42; // se rétrécit vers la pointe
-  if (t < 0.14) {
-    // léger arrondi des épaules en haut
-    const k = t / 0.14;
-    w = Math.min(w, Math.sqrt(Math.max(0, 1 - (1 - k) * (1 - k))));
-  }
-  return Math.abs(x - cx) / halfW <= Math.max(0, w);
-}
-// Barre diagonale (slash) « \ » = blocage.
-function inSlash(x, y) {
-  return Math.abs(x - y) / Math.SQRT2 < 0.058;
+// Symbole de lien : deux maillons de chaîne qui s'entrecroisent le long de la
+// diagonale (contour, comme l'icône « lien » classique). Rien par-dessus.
+function inLink(x, y) {
+  const dx = x - 0.5, dy = y - 0.5;
+  // Repère tourné à 45° : u le long de la diagonale, v perpendiculaire.
+  const u = (dx + dy) / Math.SQRT2;
+  const v = (dx - dy) / Math.SQRT2;
+  const L = 0.08; // demi-longueur de chaque maillon
+  const R = 0.11; // rayon du maillon
+  const TH = 0.032; // épaisseur du trait
+  const C = 0.17; // décalage des deux maillons le long de la diagonale
+  const ringAt = (u0) => {
+    const cu = Math.max(u0 - L, Math.min(u0 + L, u));
+    const d = Math.sqrt((u - cu) * (u - cu) + v * v);
+    return Math.abs(d - R) < TH;
+  };
+  return ringAt(C) || ringAt(-C);
 }
 function render(size) {
   const S = 4; // suréchantillonnage
   const rgba = Buffer.alloc(size * size * 4);
-  const BLUE = [37, 99, 235];
-  const WHITE = [255, 255, 255];
-  const RED = [220, 38, 38];
+  const INK = [27, 27, 31]; // trait noir, fond transparent (comme l'image)
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
-      let r = 0, g = 0, b = 0, a = 0;
+      let a = 0;
       for (let sy = 0; sy < S; sy++) {
         for (let sx = 0; sx < S; sx++) {
           const x = (px + (sx + 0.5) / S) / size;
           const y = (py + (sy + 0.5) / S) / size;
-          if (inRoundRect(x, y)) {
-            let c = BLUE;
-            if (inShield(x, y)) c = inSlash(x, y) ? RED : WHITE;
-            r += c[0]; g += c[1]; b += c[2]; a += 255;
-          }
+          if (inLink(x, y)) a += 255;
         }
       }
       const n = S * S;
       const i = (py * size + px) * 4;
-      // Moyenne des couleurs sur les seuls échantillons couverts (évite un
-      // halo sombre sur les bords anti-aliasés).
-      const cov = a / 255; // nombre d'échantillons couverts
-      rgba[i] = cov ? Math.round(r / cov) : 0;
-      rgba[i + 1] = cov ? Math.round(g / cov) : 0;
-      rgba[i + 2] = cov ? Math.round(b / cov) : 0;
+      // Trait noir uniforme ; seul l'alpha varie (anti-aliasing + transparence).
+      rgba[i] = INK[0];
+      rgba[i + 1] = INK[1];
+      rgba[i + 2] = INK[2];
       rgba[i + 3] = Math.round(a / n);
     }
   }

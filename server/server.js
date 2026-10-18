@@ -49,8 +49,25 @@ if (!PASSPHRASE) {
 }
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-const VISITS_FILE = path.join(DATA_DIR, "visits.ndjson");
-const HISTORY_FILE = path.join(DATA_DIR, "history.ndjson");
+
+// Un fichier séparé PAR APPAREIL.
+//   <appareil>.visits.ndjson   et   <appareil>.history.ndjson
+function safe(name) {
+  return (
+    String(name || "inconnu").toLowerCase().replace(/[^a-z0-9_-]+/g, "_").slice(0, 60) ||
+    "inconnu"
+  );
+}
+function deviceOf(payload) {
+  const tag = payload && payload.deviceTag && String(payload.deviceTag).trim();
+  return tag || (payload && payload.clientId) || "inconnu";
+}
+function visitsFile(device) {
+  return path.join(DATA_DIR, safe(device) + ".visits.ndjson");
+}
+function historyFile(device) {
+  return path.join(DATA_DIR, safe(device) + ".history.ndjson");
+}
 
 // --- Déchiffrement (miroir de grEncrypt côté extension) --------------
 
@@ -101,11 +118,11 @@ function appendItems(file, items, meta) {
   return items.length;
 }
 
-function tailJson(file, limit, device) {
+function readJsonl(file) {
   if (!fs.existsSync(file)) return [];
   const text = fs.readFileSync(file, "utf8").trim();
   if (!text) return [];
-  let rows = text
+  return text
     .split("\n")
     .map((l) => {
       try {
@@ -115,7 +132,35 @@ function tailJson(file, limit, device) {
       }
     })
     .filter(Boolean);
-  if (device) rows = rows.filter((r) => (r.deviceTag || "") === device);
+}
+
+function visitFilesList() {
+  try {
+    return fs.readdirSync(DATA_DIR).filter((f) => f.endsWith(".visits.ndjson"));
+  } catch {
+    return [];
+  }
+}
+
+// Liste des appareils connus : { key (nom de fichier), label (étiquette lisible) }.
+function listDevices() {
+  return visitFilesList().map((f) => {
+    const key = f.replace(/\.visits\.ndjson$/, "");
+    const rows = readJsonl(path.join(DATA_DIR, f));
+    const last = rows.length ? rows[rows.length - 1] : null;
+    return { key, label: (last && last.deviceTag) || key };
+  });
+}
+
+// Visites récentes : un appareil précis (deviceKey) ou tous (deviceKey vide).
+function recentVisits(deviceKey, limit) {
+  let rows = [];
+  if (deviceKey) {
+    rows = readJsonl(visitsFile(deviceKey));
+  } else {
+    for (const f of visitFilesList()) rows = rows.concat(readJsonl(path.join(DATA_DIR, f)));
+  }
+  rows.sort((a, b) => (a.ts || a.receivedAt || 0) - (b.ts || b.receivedAt || 0));
   return rows.slice(Math.max(0, rows.length - limit)).reverse();
 }
 
@@ -163,16 +208,18 @@ function readBody(req) {
   });
 }
 
-function dashboard(device) {
-  const visits = tailJson(VISITS_FILE, 500, device);
-  const devices = new Set();
-  tailJson(VISITS_FILE, 5000).forEach((v) => devices.add(v.deviceTag || ""));
-  const opts = ["", ...[...devices].filter((d) => d && d !== "")]
-    .map(
-      (d) =>
-        `<option value="${esc(d)}"${d === device ? " selected" : ""}>${
-          d ? esc(d) : "tous les appareils"
-        }</option>`
+function dashboard(deviceKey) {
+  const visits = recentVisits(deviceKey, 500);
+  const opts = [
+    `<option value=""${deviceKey ? "" : " selected"}>tous les appareils</option>`,
+  ]
+    .concat(
+      listDevices().map(
+        (d) =>
+          `<option value="${esc(d.key)}"${d.key === deviceKey ? " selected" : ""}>${esc(
+            d.label
+          )}</option>`
+      )
     )
     .join("");
   const rows = visits
@@ -209,7 +256,7 @@ function dashboard(device) {
 </style></head><body>
 <h1>Garde-Redirections — dernières visites (déchiffrées localement)</h1>
 <form method=get>Appareil : <select name=device onchange="this.form.submit()">${opts}</select></form>
-<p class=muted>${visits.length} entrée(s). Données : <code>${esc(VISITS_FILE)}</code></p>
+<p class=muted>${visits.length} entrée(s). Dossier : <code>${esc(DATA_DIR)}</code> — un fichier <code>&lt;appareil&gt;.visits.ndjson</code> par appareil.</p>
 <table><thead><tr><th>Date</th><th>Appareil</th><th>Site</th><th>Titre / URL</th><th></th></tr></thead>
 <tbody>${rows || '<tr><td colspan=5 class=muted>Rien encore.</td></tr>'}</tbody></table>
 </body></html>`;
@@ -238,10 +285,11 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: false, error: "déchiffrement impossible" }));
       }
+      const device = deviceOf(payload);
       const meta = { clientId: payload.clientId, deviceTag: payload.deviceTag };
       let saved = 0;
-      if (payload.kind === "visits") saved = appendItems(VISITS_FILE, payload.items, meta);
-      else if (payload.kind === "history") saved = appendItems(HISTORY_FILE, payload.items, meta);
+      if (payload.kind === "visits") saved = appendItems(visitsFile(device), payload.items, meta);
+      else if (payload.kind === "history") saved = appendItems(historyFile(device), payload.items, meta);
       // "ping" : rien à stocker, mais le déchiffrement a réussi => clé OK.
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: true, kind: payload.kind, saved }));
@@ -255,7 +303,7 @@ const server = http.createServer(async (req, res) => {
     const limit = Math.min(5000, parseInt(url.searchParams.get("limit"), 10) || 500);
     const device = url.searchParams.get("device") || "";
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify(tailJson(VISITS_FILE, limit, device)));
+    return res.end(JSON.stringify(recentVisits(device, limit)));
   }
 
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
