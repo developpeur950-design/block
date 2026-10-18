@@ -162,7 +162,7 @@ function log(...a) {
   console.log(ts(), ...a);
 }
 
-const server = http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -207,14 +207,27 @@ const server = http.createServer(async (req, res) => {
   log(req.method + " " + url.pathname + " -> 404 (le serveur ne fait que recevoir)");
   res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
   res.end();
-});
+};
 
-server.listen(PORT, HOST, () => {
-  console.log("Garde-Redirections — serveur de RÉCEPTION (privé, chiffré)");
-  console.log("  Écoute        : http://" + HOST + ":" + PORT);
-  console.log("  Endpoint POST : http://" + HOST + ":" + PORT + "/collect  (réception seule)");
-  console.log("  Données       : " + DATA_DIR + "  (un fichier .ndjson par appareil)");
-  console.log("  Jeton Bearer  : " + (SERVER_KEY ? "oui" : "non"));
-  console.log("  Chiffrement   : AES-256-GCM (PASSPHRASE requise)");
-  console.log("  Aucune page web : visiter l'adresse ne montre rien.");
-});
+console.log("Garde-Redirections — serveur de RÉCEPTION (privé, chiffré)");
+console.log("  Données      : " + DATA_DIR + "  (un fichier .ndjson par appareil)");
+console.log("  Jeton Bearer : " + (SERVER_KEY ? "oui" : "non"));
+console.log("  Chiffrement  : AES-256-GCM (PASSPHRASE requise)");
+
+// On écoute sur l'adresse configurée (Tailscale) ET sur localhost, pour que
+// l'extension joigne le serveur quelle que soit l'URL utilisée (MagicDNS,
+// IP Tailscale ou localhost). Ajouter 127.0.0.1 n'expose rien de plus.
+const hosts = [HOST];
+if (!["127.0.0.1", "localhost", "0.0.0.0"].includes(HOST)) hosts.push("127.0.0.1");
+
+for (const host of hosts) {
+  const s = http.createServer(handler);
+  s.on("error", (e) => {
+    if (e.code === "EADDRINUSE")
+      console.error("  ⚠️  " + host + ":" + PORT + " déjà utilisé (un serveur tourne déjà ?).");
+    else console.error("  ⚠️  écoute " + host + " impossible : " + e.code);
+  });
+  s.listen(PORT, host, () => {
+    console.log("  Écoute       : http://" + host + ":" + PORT + "/collect");
+  });
+}
