@@ -1,11 +1,6 @@
-// Logique du popup : interrupteur, journal récent, envoi manuel.
+// Popup minimal : liste des sites protégés + ajout / suppression.
 
 const $ = (id) => document.getElementById(id);
-
-function fmtTime(ts) {
-  const d = new Date(ts);
-  return d.toLocaleString();
-}
 
 function esc(s) {
   return (s || "").replace(/[&<>"]/g, (c) =>
@@ -13,84 +8,68 @@ function esc(s) {
   );
 }
 
+// On n'affiche que le site de base (host), même si on a collé une adresse complète.
+function toHost(entry) {
+  let e = (entry || "").trim();
+  if (!e) return "";
+  e = e.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+  const slash = e.indexOf("/");
+  return (slash === -1 ? e : e.slice(0, slash)).toLowerCase();
+}
+
+async function getList() {
+  const d = await grGet();
+  return (d.watchedLinks || []).slice();
+}
+
+async function saveList(list) {
+  await grSet({ watchedLinks: list });
+}
+
 async function render() {
-  const data = await grGet();
-
-  $("enabled").checked = !!data.enabled;
-  $("stateLabel").textContent = data.enabled ? "Actif" : "Inactif";
-
-  const log = (data.visitLog || []).slice().reverse().slice(0, 30);
-  const ul = $("log");
+  const list = await getList();
+  const ul = $("list");
   ul.innerHTML = "";
-  if (log.length === 0) {
-    ul.innerHTML = '<li style="color:var(--muted)">Aucune visite enregistrée.</li>';
+  if (list.length === 0) {
+    ul.innerHTML = '<li class="empty">Aucun site. Ajoute-en un ci-dessous.</li>';
+    return;
   }
-  for (const e of log) {
+  list.forEach((entry, i) => {
     const li = document.createElement("li");
-    const tag =
-      e.type === "blocked"
-        ? '<span class="tag blocked">bloqué</span>'
-        : e.type === "redirect"
-        ? '<span class="tag">redirection</span>'
-        : "";
-    li.innerHTML =
-      '<div class="row"><span class="host">' +
-      esc(e.host) +
-      "</span>" +
-      '<span class="time">' +
-      fmtTime(e.ts) +
-      "</span></div>" +
-      '<div class="row"><span class="ttl">' +
-      esc(e.title || e.url) +
-      "</span>" +
-      tag +
-      "</div>";
+    const span = document.createElement("span");
+    span.className = "site";
+    span.textContent = toHost(entry) || entry;
+    const btn = document.createElement("button");
+    btn.className = "del";
+    btn.textContent = "×";
+    btn.title = "Retirer";
+    btn.addEventListener("click", async () => {
+      const l = await getList();
+      l.splice(i, 1);
+      await saveList(l);
+      render();
+    });
+    li.appendChild(span);
+    li.appendChild(btn);
     ul.appendChild(li);
-  }
-
-  const watched = (data.watchedLinks || []).length;
-  const unsent = (data.visitLog || []).filter((e) => !e.sent).length;
-
-  let info = "";
-  if (watched === 0) {
-    info = "🛡️ Aucun lien protégé — l'extension ne bloque rien. Ajoute des liens dans les Options.";
-  } else {
-    info = "🛡️ " + watched + " lien(s) protégé(s).";
-  }
-  if (data.serverUrl) {
-    info += "<br>Serveur : <strong>" + esc(data.serverUrl) + "</strong> — " + unsent + " en attente.";
-    if (!data.passphrase) info += "<br>⚠️ Phrase secrète manquante : aucun envoi possible.";
-  } else {
-    info += "<br>Aucun serveur configuré — tout reste en local.";
-  }
-  $("serverInfo").innerHTML = info;
+  });
 }
 
-function send(type, extra) {
-  return new Promise((resolve) =>
-    chrome.runtime.sendMessage(Object.assign({ type }, extra || {}), resolve)
-  );
+async function addSite() {
+  const host = toHost($("input").value);
+  if (!host) return;
+  const list = await getList();
+  if (!list.map(toHost).includes(host)) {
+    list.push(host);
+    await saveList(list);
+  }
+  $("input").value = "";
+  render();
 }
 
-$("enabled").addEventListener("change", async (e) => {
-  await grSet({ enabled: e.target.checked });
-  render();
+$("add").addEventListener("click", addSite);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addSite();
 });
-
-$("sync").addEventListener("click", async () => {
-  $("status").textContent = "Envoi en cours…";
-  const r = await send("syncNow");
-  if (r && r.ok) $("status").textContent = r.sent + " entrée(s) envoyée(s).";
-  else $("status").textContent = "Échec : " + (r ? r.reason : "inconnu");
-  render();
-});
-
-$("clear").addEventListener("click", async () => {
-  await send("clearLog");
-  $("status").textContent = "Journal vidé.";
-  render();
-});
-
-$("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 render();

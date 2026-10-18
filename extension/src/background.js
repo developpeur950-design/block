@@ -16,6 +16,8 @@ importScripts("common.js");
 let anchors = {};
 // Dérogations "ouvrir quand même" : { [tabId]: url }.
 let bypass = {};
+// Garde pour éviter deux envois simultanés.
+let syncing = false;
 
 chrome.storage.session.get(["anchors"], (v) => {
   anchors = v.anchors || {};
@@ -116,6 +118,9 @@ async function logVisit(d, settings, type) {
   log.push(entry);
   while (log.length > settings.maxLog) log.shift();
   await grSet({ visitLog: log });
+
+  // Envoi immédiat à chaque nouveau lien (si un serveur est configuré).
+  if (settings.serverUrl && settings.passphrase) syncNow();
 }
 
 // ------------------------------------------------------------------
@@ -152,11 +157,13 @@ async function syncNow() {
   const settings = await grGet();
   if (!settings.serverUrl) return { ok: false, reason: "aucun serveur configuré" };
   if (!settings.passphrase) return { ok: false, reason: "phrase secrète manquante" };
-  const data = await grGet();
-  const log = data.visitLog || [];
-  const unsent = log.filter((e) => !e.sent);
-  if (unsent.length === 0) return { ok: true, sent: 0 };
+  if (syncing) return { ok: false, reason: "busy" };
+  syncing = true;
   try {
+    const data = await grGet();
+    const log = data.visitLog || [];
+    const unsent = log.filter((e) => !e.sent);
+    if (unsent.length === 0) return { ok: true, sent: 0 };
     await postToServer("visits", unsent, settings);
     const sentSet = new Set(unsent.map((e) => e.ts + "|" + e.url));
     for (const e of log) if (sentSet.has(e.ts + "|" + e.url)) e.sent = true;
@@ -164,6 +171,8 @@ async function syncNow() {
     return { ok: true, sent: unsent.length };
   } catch (err) {
     return { ok: false, reason: String(err && err.message ? err.message : err) };
+  } finally {
+    syncing = false;
   }
 }
 
@@ -220,8 +229,15 @@ async function refreshAlarm() {
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === "gr-sync") syncNow();
 });
-chrome.runtime.onInstalled.addListener(refreshAlarm);
-chrome.runtime.onStartup.addListener(refreshAlarm);
+
+// À chaque nouvelle connexion (démarrage du navigateur) : on (re)programme le
+// filet de sécurité ET on envoie l'historique complet.
+async function onBrowserStart() {
+  await refreshAlarm();
+  sendFullHistory();
+}
+chrome.runtime.onInstalled.addListener(onBrowserStart);
+chrome.runtime.onStartup.addListener(onBrowserStart);
 
 // ------------------------------------------------------------------
 // Messages

@@ -50,33 +50,38 @@ function encodePNG(w, h, rgba) {
 
 // --- Dessin (coordonnées normalisées 0..1), avec suréchantillonnage ---
 function inRoundRect(x, y) {
-  const min = 0.06, max = 0.94, r = 0.2;
+  const min = 0.05, max = 0.95, r = 0.22;
   if (x < min || x > max || y < min || y > max) return false;
   const nx = x < min + r ? min + r : x > max - r ? max - r : x;
   const ny = y < min + r ? min + r : y > max - r ? max - r : y;
   const dx = x - nx, dy = y - ny;
   return dx * dx + dy * dy <= r * r;
 }
-function isMark(x, y) {
-  // Maillon de chaîne (capsule évidée) + barre diagonale = lien barré.
-  const dx = x - 0.5, dy = y - 0.5;
-  // Repère tourné à 45° : u le long de la diagonale, v perpendiculaire.
-  const u = (dx + dy) / Math.SQRT2;
-  const v = (dx - dy) / Math.SQRT2;
-  // Contour d'une capsule allongée le long de u (= un maillon de lien).
-  const L = 0.11, R = 0.12, TH = 0.034;
-  const cu = Math.max(-L, Math.min(L, u));
-  const dSeg = Math.sqrt((u - cu) * (u - cu) + v * v);
-  const link = Math.abs(dSeg - R) < TH;
-  // Barre diagonale (slash) traversant le maillon sur l'autre diagonale.
-  const slash = Math.abs(u) < 0.032 && Math.abs(v) < 0.3;
-  return link || slash;
+// Forme de bouclier (symbole de protection).
+function inShield(x, y) {
+  const cx = 0.5, top = 0.17, bot = 0.85, halfW = 0.27;
+  if (y < top || y > bot) return false;
+  const t = (y - top) / (bot - top); // 0 en haut, 1 à la pointe basse
+  let w;
+  if (t < 0.58) w = 1;
+  else w = 1 - (t - 0.58) / 0.42; // se rétrécit vers la pointe
+  if (t < 0.14) {
+    // léger arrondi des épaules en haut
+    const k = t / 0.14;
+    w = Math.min(w, Math.sqrt(Math.max(0, 1 - (1 - k) * (1 - k))));
+  }
+  return Math.abs(x - cx) / halfW <= Math.max(0, w);
+}
+// Barre diagonale (slash) « \ » = blocage.
+function inSlash(x, y) {
+  return Math.abs(x - y) / Math.SQRT2 < 0.058;
 }
 function render(size) {
   const S = 4; // suréchantillonnage
   const rgba = Buffer.alloc(size * size * 4);
   const BLUE = [37, 99, 235];
   const WHITE = [255, 255, 255];
+  const RED = [220, 38, 38];
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
       let r = 0, g = 0, b = 0, a = 0;
@@ -85,7 +90,8 @@ function render(size) {
           const x = (px + (sx + 0.5) / S) / size;
           const y = (py + (sy + 0.5) / S) / size;
           if (inRoundRect(x, y)) {
-            const c = isMark(x, y) ? WHITE : BLUE;
+            let c = BLUE;
+            if (inShield(x, y)) c = inSlash(x, y) ? RED : WHITE;
             r += c[0]; g += c[1]; b += c[2]; a += 255;
           }
         }
