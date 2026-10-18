@@ -70,8 +70,30 @@ Charge le dossier `extension/` comme à l'option 1. Elle est déjà configurée.
 
 ### Consulter tes données
 
-Depuis ton réseau Tailscale : `http://<ton-magicdns>:8787/` (tableau de bord, filtrable
-par appareil) ou `http://<ton-magicdns>:8787/api/visits` (JSON).
+Le serveur **ne fait que recevoir** : il n'affiche aucune page. Visiter son adresse ne
+montre rien (page vide). Les données sont écrites en clair sur le disque du serveur, **un
+fichier par appareil** :
+
+```
+server/data/<appareil>.visits.ndjson    ← liens visités
+server/data/<appareil>.history.ndjson   ← historique (au démarrage du navigateur)
+```
+
+Ouvre ces fichiers directement (une ligne JSON par entrée) pour consulter les données.
+
+### Mettre l'extension sur un autre PC (et envoyer au même serveur)
+
+Sur le 2ᵉ PC, **ne lance pas `setup.js`** (il générerait de nouveaux secrets et pointerait
+vers lui-même). À la place, donne-lui la même config que le serveur, au choix :
+
+- **Simple** : copie le fichier `extension/src/config.js` du PC serveur vers le même
+  emplacement sur le 2ᵉ PC (il contient l'URL du serveur, la phrase secrète et le jeton).
+- **Ou à la main** : charge l'extension, ouvre ses **Options**, et saisis la même **URL de
+  serveur**, la même **phrase secrète** et le même **jeton** que sur le serveur.
+
+Puis change l'**étiquette d'appareil** (Options) pour un nom différent → ses données
+arriveront dans son propre fichier `<appareil>.visits.ndjson`. L'extension enverra bien au
+PC serveur, depuis n'importe quel appareil de ton réseau Tailscale.
 
 ---
 

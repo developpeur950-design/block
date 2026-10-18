@@ -118,59 +118,6 @@ function appendItems(file, items, meta) {
   return items.length;
 }
 
-function readJsonl(file) {
-  if (!fs.existsSync(file)) return [];
-  const text = fs.readFileSync(file, "utf8").trim();
-  if (!text) return [];
-  return text
-    .split("\n")
-    .map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-}
-
-function visitFilesList() {
-  try {
-    return fs.readdirSync(DATA_DIR).filter((f) => f.endsWith(".visits.ndjson"));
-  } catch {
-    return [];
-  }
-}
-
-// Liste des appareils connus : { key (nom de fichier), label (étiquette lisible) }.
-function listDevices() {
-  return visitFilesList().map((f) => {
-    const key = f.replace(/\.visits\.ndjson$/, "");
-    const rows = readJsonl(path.join(DATA_DIR, f));
-    const last = rows.length ? rows[rows.length - 1] : null;
-    return { key, label: (last && last.deviceTag) || key };
-  });
-}
-
-// Visites récentes : un appareil précis (deviceKey) ou tous (deviceKey vide).
-function recentVisits(deviceKey, limit) {
-  let rows = [];
-  if (deviceKey) {
-    rows = readJsonl(visitsFile(deviceKey));
-  } else {
-    for (const f of visitFilesList()) rows = rows.concat(readJsonl(path.join(DATA_DIR, f)));
-  }
-  rows.sort((a, b) => (a.ts || a.receivedAt || 0) - (b.ts || b.receivedAt || 0));
-  return rows.slice(Math.max(0, rows.length - limit)).reverse();
-}
-
-function esc(s) {
-  return String(s == null ? "" : s).replace(
-    /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
-  );
-}
-
 // --- HTTP ------------------------------------------------------------
 
 function cors(res) {
@@ -206,60 +153,6 @@ function readBody(req) {
     });
     req.on("error", reject);
   });
-}
-
-function dashboard(deviceKey) {
-  const visits = recentVisits(deviceKey, 500);
-  const opts = [
-    `<option value=""${deviceKey ? "" : " selected"}>tous les appareils</option>`,
-  ]
-    .concat(
-      listDevices().map(
-        (d) =>
-          `<option value="${esc(d.key)}"${d.key === deviceKey ? " selected" : ""}>${esc(
-            d.label
-          )}</option>`
-      )
-    )
-    .join("");
-  const rows = visits
-    .map((v) => {
-      const when = new Date(v.ts || v.receivedAt).toLocaleString();
-      const tag =
-        v.type === "blocked"
-          ? '<span class="t b">bloqué</span>'
-          : v.type === "redirect"
-          ? '<span class="t">redirection</span>'
-          : "";
-      return (
-        "<tr><td>" + esc(when) +
-        "</td><td>" + esc(v.deviceTag || "—") +
-        "</td><td>" + esc(v.host) +
-        '</td><td class=ttl title="' + esc(v.url) + '">' + esc(v.title || v.url) +
-        "</td><td>" + tag + "</td></tr>"
-      );
-    })
-    .join("");
-  return `<!DOCTYPE html><html lang=fr><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width, initial-scale=1">
-<title>Garde-Redirections — collecte</title>
-<style>
-  :root{color-scheme:light dark}
-  body{font:14px/1.5 system-ui,sans-serif;max-width:1000px;margin:0 auto;padding:20px}
-  h1{font-size:18px} form{margin:10px 0}
-  table{width:100%;border-collapse:collapse}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #8884;font-size:13px}
-  td.ttl{max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .t{font-size:11px;border:1px solid #8886;border-radius:10px;padding:1px 6px}
-  .t.b{color:#dc2626;border-color:#dc2626}
-  .muted{color:#888}
-</style></head><body>
-<h1>Garde-Redirections — dernières visites (déchiffrées localement)</h1>
-<form method=get>Appareil : <select name=device onchange="this.form.submit()">${opts}</select></form>
-<p class=muted>${visits.length} entrée(s). Dossier : <code>${esc(DATA_DIR)}</code> — un fichier <code>&lt;appareil&gt;.visits.ndjson</code> par appareil.</p>
-<table><thead><tr><th>Date</th><th>Appareil</th><th>Site</th><th>Titre / URL</th><th></th></tr></thead>
-<tbody>${rows || '<tr><td colspan=5 class=muted>Rien encore.</td></tr>'}</tbody></table>
-</body></html>`;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -299,28 +192,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && url.pathname === "/api/visits") {
-    const limit = Math.min(5000, parseInt(url.searchParams.get("limit"), 10) || 500);
-    const device = url.searchParams.get("device") || "";
-    res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify(recentVisits(device, limit)));
-  }
-
-  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    return res.end(dashboard(url.searchParams.get("device") || ""));
-  }
-
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: false, error: "introuvable" }));
+  // Réception uniquement : aucune autre route. On ne montre/renvoie rien.
+  // (page vide pour un visiteur qui tomberait sur l'adresse du serveur)
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end();
 });
 
 server.listen(PORT, HOST, () => {
-  console.log("Garde-Redirections — serveur de collecte (privé, chiffré)");
-  console.log("  Écoute         : http://" + HOST + ":" + PORT);
-  console.log("  Endpoint POST  : http://" + HOST + ":" + PORT + "/collect");
-  console.log("  Tableau de bord: http://" + HOST + ":" + PORT + "/");
-  console.log("  Données        : " + DATA_DIR);
-  console.log("  Jeton Bearer   : " + (SERVER_KEY ? "oui" : "non"));
-  console.log("  Chiffrement    : AES-256-GCM (PASSPHRASE requise)");
+  console.log("Garde-Redirections — serveur de RÉCEPTION (privé, chiffré)");
+  console.log("  Écoute        : http://" + HOST + ":" + PORT);
+  console.log("  Endpoint POST : http://" + HOST + ":" + PORT + "/collect  (réception seule)");
+  console.log("  Données       : " + DATA_DIR + "  (un fichier .ndjson par appareil)");
+  console.log("  Jeton Bearer  : " + (SERVER_KEY ? "oui" : "non"));
+  console.log("  Chiffrement   : AES-256-GCM (PASSPHRASE requise)");
+  console.log("  Aucune page web : visiter l'adresse ne montre rien.");
 });
