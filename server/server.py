@@ -19,7 +19,7 @@ import time
 import base64
 import hashlib
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -228,33 +228,53 @@ def device_of(payload):
     return tag or payload.get("clientId") or "inconnu"
 
 
+def _row_json(it, meta, now):
+    row = dict(it)
+    row["deviceTag"] = meta.get("deviceTag") or ""
+    row["clientId"] = meta.get("clientId") or "inconnu"
+    row["receivedAt"] = now
+    # JSON compact : aucun espace superflu.
+    return json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+
+
 def append_items(kind, items, meta):
+    """Ajoute des entrées à un fichier tableau JSON compact, en RAM minimale.
+
+    On n'ouvre PAS tout le fichier : on remplace juste le « ] » final par
+    « ,<nouvelles entrées>] ». Seuls quelques octets de fin sont lus.
+    """
     if not isinstance(items, list) or not items:
         return 0
     path = os.path.join(DATA_DIR, safe(meta["device"]) + "." + kind + ".json")
-    # Fichier JSON = un tableau d'objets. On lit, on ajoute, on réécrit.
-    existing = []
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if not isinstance(existing, list):
-                existing = []
-        except Exception:
-            existing = []
     now = int(time.time() * 1000)
-    for it in items:
-        row = dict(it)
-        row["deviceTag"] = meta.get("deviceTag") or ""
-        row["clientId"] = meta.get("clientId") or "inconnu"
-        row["receivedAt"] = now
-        existing.append(row)
-    # Écriture atomique (fichier temporaire puis remplacement) pour ne pas
-    # corrompre le JSON si l'écriture est interrompue.
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(existing, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    payload = ",".join(_row_json(it, meta, now) for it in items).encode("utf-8")
+
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+
+    if size <= 0:
+        with open(path, "wb") as f:
+            f.write(b"[" + payload + b"]")
+        return len(items)
+
+    with open(path, "r+b") as f:
+        back = min(size, 64)
+        f.seek(size - back)
+        tail = f.read(back)
+        rb = tail.rfind(b"]")
+        if rb == -1:
+            # Fichier anormal (ne devrait pas arriver) : on repart proprement.
+            f.seek(0)
+            f.truncate()
+            f.write(b"[" + payload + b"]")
+            return len(items)
+        close_pos = size - back + rb
+        empty = tail[:rb].rstrip().endswith(b"[")
+        f.seek(close_pos)
+        f.truncate()
+        f.write((b"" if empty else b",") + payload + b"]")
     return len(items)
 
 
@@ -303,8 +323,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, {"ok": False, "error": "non autorisé"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > 20 * 1024 * 1024:  # garde-fou RAM : corps trop volumineux
+                return self._send(413, {"ok": False, "error": "trop volumineux"})
             body = self.rfile.read(length) if length else b"{}"
             envelope = json.loads(body.decode("utf-8") or "{}")
+            del body
         except Exception as e:
             return self._send(400, {"ok": False, "error": str(e)})
         try:
@@ -335,22 +358,27 @@ def main():
     if HOST not in ("127.0.0.1", "localhost", "0.0.0.0"):
         hosts.append("127.0.0.1")
 
+    # HTTPServer simple (pas un thread par requête) pour une RAM minimale.
+    # Les envois de l'extension sont séquentiels : traiter une requête à la
+    # fois suffit largement.
     servers = []
     for host in hosts:
         try:
-            srv = ThreadingHTTPServer((host, PORT), Handler)
+            srv = HTTPServer((host, PORT), Handler)
         except OSError as e:
             print("  ⚠️  écoute %s:%d impossible : %s" % (host, PORT, e))
             continue
         servers.append(srv)
         print("  Écoute       : http://%s:%d/collect" % (host, PORT))
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     if not servers:
         raise SystemExit("Aucune interface d'écoute disponible.")
+    # Un serveur par interface : les secondaires tournent dans un thread léger,
+    # le premier dans le thread principal.
+    for srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        while True:
-            time.sleep(3600)
+        servers[0].serve_forever()
     except KeyboardInterrupt:
         print("\nArrêt.")
 
