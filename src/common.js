@@ -1,33 +1,36 @@
 // Paramètres partagés par le service worker, le popup et la page d'options.
 // Chargé via importScripts() dans le service worker et via <script> dans les pages.
 
-// Valeurs par défaut. Tout est modifiable dans la page d'options.
+// Valeurs par défaut.
+//
+// IMPORTANT : par défaut, "watchedLinks" est vide => l'extension ne bloque RIEN.
+// Le blocage ne s'active que sur les liens/débuts de liens que tu ajoutes.
 const GR_DEFAULTS = {
-  enabled: true, // extension active ou non
-  mode: "redirects", // "redirects" | "same-domain" | "allowlist"
-  includeSubdomains: true, // considérer les sous-domaines comme le même site
-  allowlist: [], // domaines toujours autorisés (ex: "paypal.com")
+  enabled: true, // interrupteur général
+  watchedLinks: [], // liens ou débuts de liens à protéger (un par entrée). Vide = ne fait rien.
+  includeSubdomains: true, // considérer les sous-domaines comme le même site de base
+  allowlist: [], // domaines toujours autorisés, même à l'intérieur d'une zone protégée
   logging: true, // journaliser les visites
-  serverUrl: "", // TON serveur (POST JSON). Vide = tout reste en local.
-  serverKey: "", // jeton optionnel envoyé en en-tête Authorization: Bearer ...
-  syncIntervalMin: 5, // fréquence d'envoi automatique au serveur (minutes)
+  serverUrl: "", // TON serveur (POST). Vide = tout reste en local.
+  serverKey: "", // jeton optionnel (en-tête Authorization: Bearer ...)
+  passphrase: "", // phrase secrète du chiffrement de bout en bout (obligatoire pour envoyer)
+  deviceTag: "", // étiquette de cet appareil (ex: "PC bureau", "portable")
+  syncIntervalMin: 5, // envoi automatique (minutes). 0 = manuel.
   maxLog: 2000, // nombre maximum d'entrées conservées localement
+  pbkdf2Iter: 150000, // itérations de dérivation de clé
 };
 
-// Lit tout le stockage local et complète avec les valeurs par défaut.
 function grGet() {
   return new Promise((resolve) => {
     chrome.storage.local.get(null, (v) => resolve({ ...GR_DEFAULTS, ...v }));
   });
 }
 
-// Écrit un objet de clés/valeurs dans le stockage local.
 function grSet(obj) {
   return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
 }
 
-// Identifiant aléatoire et stable de ce navigateur (utile côté serveur
-// si tu synchronises depuis plusieurs machines). Généré une seule fois.
+// Identifiant aléatoire stable de ce navigateur (généré une fois).
 async function grClientId() {
   const data = await grGet();
   if (data.clientId) return data.clientId;
@@ -38,41 +41,136 @@ async function grClientId() {
   return id;
 }
 
-// Normalise une URL en nom d'hôte (sans le "www.").
 function grHost(url) {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return "";
   }
 }
 
-// Décide si un hôte cible est autorisé par rapport à l'hôte "ancre" du tab.
-function grHostAllowed(targetHost, anchorHost, settings) {
-  if (!targetHost) return true;
-  if (!anchorHost) return true; // pas encore d'ancre: on laisse passer
-  if (targetHost === anchorHost) return true;
-  if (settings.includeSubdomains) {
-    if (targetHost.endsWith("." + anchorHost)) return true; // sous-domaine
-    if (anchorHost.endsWith("." + targetHost)) return true; // domaine parent
-  }
-  return grInAllowlist(targetHost, settings.allowlist);
+// --- Zones protégées -------------------------------------------------
+// Une "zone" est définie par une entrée watchedLinks : soit un domaine
+// ("ma-banque.fr"), soit un début de lien ("https://ma-banque.fr/compte").
+
+function grParseZone(entry) {
+  let e = (entry || "").trim();
+  if (!e) return null;
+  let rest = e.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+  const slash = rest.indexOf("/");
+  const host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase();
+  const pathPrefix = slash === -1 ? "" : rest.slice(slash); // commence par "/"
+  if (!host) return null;
+  return { raw: e, host, pathPrefix };
 }
 
-// Vrai si l'hôte correspond à un domaine de la liste blanche (ou un sous-domaine).
-function grInAllowlist(host, allowlist) {
-  return (allowlist || []).some(
-    (d) => d && (host === d || host.endsWith("." + d))
+function grUrlParts(url) {
+  try {
+    const u = new URL(url);
+    return {
+      host: u.hostname.replace(/^www\./, "").toLowerCase(),
+      path: u.pathname + u.search,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// La page "url" fait-elle partie de la zone décrite par "zone" ?
+function grMatchZone(url, zone, settings) {
+  const p = grUrlParts(url);
+  if (!p || !zone) return false;
+  const hostOk =
+    p.host === zone.host ||
+    (settings.includeSubdomains && p.host.endsWith("." + zone.host));
+  if (!hostOk) return false;
+  if (!zone.pathPrefix || zone.pathPrefix === "/") return true;
+  return p.path.startsWith(zone.pathPrefix);
+}
+
+// Renvoie la zone qui contient cette URL, ou null.
+function grZoneForUrl(url, watchedLinks, settings) {
+  for (const raw of watchedLinks || []) {
+    const z = grParseZone(raw);
+    if (z && grMatchZone(url, z, settings)) return z;
+  }
+  return null;
+}
+
+// L'hôte cible reste-t-il sur le site de base (même host, sous-domaine, ou liste blanche) ?
+function grStaysOnBase(targetHost, baseHost, settings) {
+  if (!targetHost) return true;
+  if (targetHost === baseHost) return true;
+  if (settings.includeSubdomains) {
+    if (targetHost.endsWith("." + baseHost)) return true;
+    if (baseHost.endsWith("." + targetHost)) return true;
+  }
+  return (settings.allowlist || []).some(
+    (d) => d && (targetHost === d || targetHost.endsWith("." + d))
   );
 }
 
-// Expose les fonctions dans le scope global du service worker.
+// --- Chiffrement de bout en bout (AES-256-GCM / PBKDF2-SHA256) --------
+
+function grB64(bytes) {
+  const a = new Uint8Array(bytes);
+  let s = "";
+  for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+  return btoa(s);
+}
+
+async function grDeriveKey(passphrase, salt, iter, usages) {
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    usages
+  );
+}
+
+// Chiffre un objet -> enveloppe JSON transportable.
+async function grEncrypt(obj, passphrase, iter) {
+  const enc = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await grDeriveKey(passphrase, salt, iter, ["encrypt"]);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    enc.encode(JSON.stringify(obj))
+  );
+  return {
+    v: 1,
+    alg: "AES-GCM",
+    kdf: "PBKDF2-SHA256",
+    iter,
+    salt: grB64(salt),
+    iv: grB64(iv),
+    ct: grB64(ct),
+  };
+}
+
 if (typeof self !== "undefined") {
-  self.GR_DEFAULTS = GR_DEFAULTS;
-  self.grGet = grGet;
-  self.grSet = grSet;
-  self.grClientId = grClientId;
-  self.grHost = grHost;
-  self.grHostAllowed = grHostAllowed;
-  self.grInAllowlist = grInAllowlist;
+  Object.assign(self, {
+    GR_DEFAULTS,
+    grGet,
+    grSet,
+    grClientId,
+    grHost,
+    grParseZone,
+    grUrlParts,
+    grMatchZone,
+    grZoneForUrl,
+    grStaysOnBase,
+    grEncrypt,
+  });
 }

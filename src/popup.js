@@ -48,14 +48,22 @@ async function render() {
     ul.appendChild(li);
   }
 
+  const watched = (data.watchedLinks || []).length;
   const unsent = (data.visitLog || []).filter((e) => !e.sent).length;
-  if (data.serverUrl) {
-    $("serverInfo").innerHTML =
-      "Serveur : <strong>" + esc(data.serverUrl) + "</strong> — " + unsent + " en attente.";
+
+  let info = "";
+  if (watched === 0) {
+    info = "🛡️ Aucun lien protégé — l'extension ne bloque rien. Ajoute des liens dans les Options.";
   } else {
-    $("serverInfo").textContent =
-      "Aucun serveur configuré — tout reste en local. Ouvre les Options pour en ajouter un.";
+    info = "🛡️ " + watched + " lien(s) protégé(s).";
   }
+  if (data.serverUrl) {
+    info += "<br>Serveur : <strong>" + esc(data.serverUrl) + "</strong> — " + unsent + " en attente.";
+    if (!data.passphrase) info += "<br>⚠️ Phrase secrète manquante : aucun envoi possible.";
+  } else {
+    info += "<br>Aucun serveur configuré — tout reste en local.";
+  }
+  $("serverInfo").innerHTML = info;
 }
 
 function send(type, extra) {

@@ -23,11 +23,11 @@
       h2 { font-size: 15px; margin-top: 28px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
       label { display: block; margin: 14px 0 4px; font-weight: 600; }
       .hint { color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
-      input[type="text"], input[type="url"], input[type="number"], select, textarea {
+      input[type="text"], input[type="url"], input[type="number"], input[type="password"], textarea {
         width: 100%; padding: 8px 10px; border: 1px solid var(--line);
         border-radius: 7px; background: transparent; color: var(--fg); font: inherit;
       }
-      textarea { min-height: 90px; resize: vertical; }
+      textarea { min-height: 90px; resize: vertical; font-family: ui-monospace, monospace; }
       .check { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-weight: 600; }
       .check input { width: auto; }
       .bar { margin-top: 24px; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -37,43 +37,58 @@
       }
       button.primary { background: var(--accent); color: #fff; border-color: transparent; }
       #status { margin-top: 14px; color: var(--muted); min-height: 20px; }
-      code { background: color-mix(in srgb, var(--fg) 10%, transparent); padding: 1px 5px; border-radius: 4px; }
+      code { background: color-mix(in srgb, var(--fg) 12%, transparent); padding: 1px 5px; border-radius: 4px; }
+      .box { border: 1px solid var(--line); border-radius: 10px; padding: 2px 14px 14px; margin-top: 8px; }
     </style>
   </head>
   <body>
     <h1>Garde-Redirections — Options</h1>
 
-    <h2>Blocage</h2>
+    <h2>Protection</h2>
     <label class="check"><input type="checkbox" id="enabled" /> Extension active</label>
 
-    <label for="mode">Règle de blocage</label>
-    <select id="mode">
-      <option value="redirects">Bloquer les redirections automatiques hors du site courant</option>
-      <option value="same-domain">Rester sur le site courant (bloque aussi les clics externes)</option>
-      <option value="allowlist">N'autoriser que les domaines de la liste blanche</option>
-    </select>
-    <div class="hint">« Site courant » = le domaine de la page sur laquelle tu te trouves.</div>
+    <label for="watchedLinks">Liens / débuts de liens à protéger</label>
+    <textarea id="watchedLinks" placeholder="ma-banque.fr&#10;https://mon-site.fr/compte"></textarea>
+    <div class="hint">
+      Un par ligne. L'extension en déduit le <strong>site de base</strong> et bloque toute
+      sortie de ce site <strong>uniquement quand tu es sur ces liens</strong>.
+      <br />Tant que cette liste est vide, l'extension ne bloque rien.
+    </div>
 
     <label class="check"><input type="checkbox" id="includeSubdomains" /> Considérer les sous-domaines comme le même site</label>
 
-    <label for="allowlist">Liste blanche (un domaine par ligne)</label>
-    <textarea id="allowlist" placeholder="exemple.com&#10;mon-site.fr"></textarea>
-    <div class="hint">Ces domaines sont toujours autorisés, quel que soit le mode.</div>
+    <label for="allowlist">Exceptions toujours autorisées (un domaine par ligne)</label>
+    <textarea id="allowlist" placeholder="paypal.com"></textarea>
+    <div class="hint">Ces domaines restent accessibles même depuis une zone protégée.</div>
 
-    <h2>Journal &amp; serveur</h2>
+    <h2>Journal &amp; serveur (chiffré de bout en bout)</h2>
     <label class="check"><input type="checkbox" id="logging" /> Journaliser les sites visités</label>
 
-    <label for="serverUrl">URL de ton serveur</label>
-    <input type="url" id="serverUrl" placeholder="https://mon-serveur.exemple/collect" />
-    <div class="hint">Laisse vide pour tout garder en local. Les données sont envoyées en <code>POST</code> JSON.</div>
+    <label for="deviceTag">Étiquette de cet appareil</label>
+    <input type="text" id="deviceTag" placeholder="ex: PC bureau" />
+    <div class="hint">Incluse (chiffrée) dans les données pour distinguer tes appareils.</div>
 
-    <label for="serverKey">Jeton d'authentification (optionnel)</label>
-    <input type="text" id="serverKey" placeholder="jeton secret" />
-    <div class="hint">Envoyé en en-tête <code>Authorization: Bearer &lt;jeton&gt;</code>.</div>
+    <label for="serverUrl">URL de ton serveur</label>
+    <input type="url" id="serverUrl" placeholder="http://localhost:8787/collect" />
+    <div class="hint">Vide = tout reste en local. Données envoyées en <code>POST</code>, chiffrées.</div>
+
+    <div class="box">
+      <label for="passphrase">Phrase secrète (chiffrement de bout en bout)</label>
+      <input type="password" id="passphrase" placeholder="phrase longue et unique" />
+      <div class="hint">
+        <strong>Doit être identique</strong> à la variable <code>PASSPHRASE</code> de ton serveur.
+        C'est la seule clé qui permet de déchiffrer : sans elle, le serveur rejette tout.
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="showPass" /> Afficher</label>
+      </div>
+    </div>
+
+    <label for="serverKey">Jeton Bearer (optionnel, 2ᵉ couche)</label>
+    <input type="text" id="serverKey" placeholder="jeton" />
+    <div class="hint">Envoyé en en-tête <code>Authorization: Bearer &lt;jeton&gt;</code> = variable <code>SERVER_KEY</code> du serveur.</div>
 
     <label for="syncIntervalMin">Envoi automatique toutes les (minutes)</label>
     <input type="number" id="syncIntervalMin" min="0" step="1" />
-    <div class="hint">0 = pas d'envoi automatique (tu enverras manuellement depuis le popup).</div>
+    <div class="hint">0 = envoi manuel uniquement.</div>
 
     <label for="maxLog">Nombre maximum d'entrées conservées localement</label>
     <input type="number" id="maxLog" min="100" step="100" />

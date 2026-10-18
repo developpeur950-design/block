@@ -1,122 +1,115 @@
 # Garde-Redirections
 
-Extension de navigateur (**Chrome, Edge, Opera** — Manifest V3) + petit serveur, **pour un usage personnel sur ton propre navigateur**.
+Extension de navigateur (**Chrome, Edge, Opera** — Manifest V3) + serveur privé, **pour un usage personnel sur tes propres navigateurs**.
 
-Elle fait deux choses :
+1. **Blocage ciblé** : par défaut l'extension **ne fait rien**. Tu ajoutes des **liens / débuts de liens** à protéger ; elle en déduit le **site de base** et bloque toute sortie de ce site **uniquement quand tu es sur ces liens**.
+2. **Journal + envoi chiffré** : elle journalise tes visites et peut les envoyer, **chiffrées de bout en bout**, vers **ton** serveur, qui les déchiffre.
 
-1. **Bloque les redirections** qui quittent le site sur lequel tu te trouves (anti-phishing / « rester sur le site »).
-2. **Journalise les sites que tu visites** et peut les envoyer vers **ton propre serveur** (URL que tu renseignes toi-même).
-
-> ⚠️ Cet outil enregistre un historique de navigation. Ne l'installe que sur **tes** navigateurs, pour **tes** données, vers **ton** serveur. Installer ce type d'outil sur l'appareil de quelqu'un d'autre à son insu est illégal dans la plupart des pays.
+> ⚠️ Cet outil enregistre un historique de navigation. À n'installer que sur **tes** navigateurs, pour **tes** données, vers **ton** serveur.
 
 ---
 
 ## 1. Installer l'extension
 
-L'extension se trouve à la racine du dépôt (`manifest.json` + dossier `src/`).
+1. Ouvre la page des extensions : `chrome://extensions`, `edge://extensions` ou `opera://extensions`.
+2. Active le **Mode développeur**.
+3. **« Charger l'extension non empaquetée »** → sélectionne le dossier **racine du dépôt** (celui qui contient `manifest.json`).
 
-### Chrome / Edge / Opera
-1. Ouvre la page des extensions :
-   - Chrome : `chrome://extensions`
-   - Edge : `edge://extensions`
-   - Opera : `opera://extensions`
-2. Active le **Mode développeur** (interrupteur en haut à droite).
-3. Clique **« Charger l'extension non empaquetée »** (*Load unpacked*).
-4. Sélectionne le dossier **racine du dépôt** (celui qui contient `manifest.json`).
-
-L'icône apparaît dans la barre d'outils. Clique dessus pour voir le journal et accéder aux **Options**.
+Les icônes sont dans `icons/` (régénérables avec `node icons/generate-icons.js`).
 
 ---
 
-## 2. Choisir la règle de blocage (Options)
+## 2. Choisir ce qui est protégé (Options)
 
-| Mode | Effet |
-|------|-------|
-| **Redirections** (défaut) | Laisse passer tes clics et tes saisies d'URL, mais bloque les **redirections automatiques** (JavaScript, `meta refresh`, redirection serveur) vers un autre domaine. |
-| **Rester sur le site** | Bloque **toute** sortie du domaine courant, y compris les clics sur des liens externes. |
-| **Liste blanche** | N'autorise **que** les domaines que tu as listés. |
+Dans **Liens / débuts de liens à protéger**, ajoute une entrée par ligne :
 
-- **Sous-domaines** : option pour considérer `a.site.com` et `b.site.com` comme le même site.
-- **Liste blanche** : domaines toujours autorisés (un par ligne), quel que soit le mode.
+```
+ma-banque.fr                     ← tout le site ma-banque.fr est protégé
+https://mon-site.fr/compte       ← protégé seulement sous /compte
+```
 
-Quand une redirection est bloquée, une page s'affiche avec deux boutons : **Retour au site** ou **Ouvrir quand même** (dérogation ponctuelle).
+- **Site de base** = le domaine de l'entrée. Quand tu es sur une page couverte, toute
+  navigation/redirection qui **quitte ce domaine** est bloquée (page d'avertissement avec
+  « Retour au site » / « Ouvrir quand même »).
+- Hors de ces liens, l'extension **ne bloque rien**.
+- **Sous-domaines** : option pour traiter `a.site.com` / `b.site.com` comme le même site.
+- **Exceptions** : domaines toujours autorisés, même depuis une zone protégée.
 
 ---
 
-## 3. Lancer ton serveur
+## 3. Lancer ton serveur (privé + chiffré)
 
-Le serveur n'a **aucune dépendance** (Node.js 18+ suffit).
-
-```bash
-cd server
-node server.js
-```
-
-Par défaut il écoute sur `http://localhost:8787` :
-
-- `POST /collect` — endpoint que l'extension appelle.
-- `GET /` — tableau de bord pour consulter tes visites.
-- `GET /api/visits?limit=500` — les données en JSON.
-
-### Options du serveur (variables d'environnement)
+Aucune dépendance (Node.js 18+). La phrase secrète est **obligatoire** :
 
 ```bash
-PORT=8787            # port d'écoute
-SERVER_KEY=secret123 # jeton exigé (optionnel mais recommandé)
-DATA_DIR=./data      # où stocker les fichiers
+PASSPHRASE="une phrase longue et unique" node server/server.js
 ```
 
-Exemple avec un jeton :
+- N'écoute que sur `127.0.0.1:8787` par défaut → **injoignable depuis le réseau**.
+- `POST /collect` — n'accepte **que** les messages déchiffrables avec `PASSPHRASE`.
+- `GET /` — tableau de bord (données déchiffrées localement), filtrable par appareil.
+- `GET /api/visits?limit=500&device=PC%20bureau` — données en JSON.
 
-```bash
-SERVER_KEY=secret123 node server/server.js
-```
+### Variables d'environnement
 
-Les données sont stockées en **NDJSON** (une ligne JSON par entrée) :
-- `server/data/visits.ndjson` — visites envoyées en continu.
-- `server/data/history.ndjson` — envoi manuel de tout l'historique.
+| Variable | Rôle | Défaut |
+|----------|------|--------|
+| `PASSPHRASE` | **obligatoire** — clé du chiffrement, identique à l'extension | — |
+| `PORT` | port d'écoute | `8787` |
+| `HOST` | interface d'écoute (`0.0.0.0` pour exposer — déconseillé) | `127.0.0.1` |
+| `SERVER_KEY` | jeton Bearer attendu (2ᵉ couche) | *(aucun)* |
+| `DATA_DIR` | dossier de stockage | `./server/data` |
 
-Ce dossier est ignoré par git (voir `.gitignore`).
+Données stockées en **NDJSON** après déchiffrement : `server/data/visits.ndjson` et `history.ndjson` (ignorés par git).
 
 ---
 
-## 4. Relier l'extension au serveur
-
-Dans les **Options** de l'extension :
+## 4. Relier l'extension au serveur (Options)
 
 1. **URL de ton serveur** : `http://localhost:8787/collect`
-2. **Jeton** : la même valeur que `SERVER_KEY` (si tu en as mis un).
-3. **Envoi automatique** : intervalle en minutes (`0` = manuel uniquement).
-4. Clique **Tester le serveur** → tu dois voir « Serveur joignable ✔ ».
+2. **Phrase secrète** : **exactement la même** que `PASSPHRASE` côté serveur.
+3. **Étiquette de cet appareil** : ex. `PC bureau` (incluse chiffrée, pour distinguer tes appareils).
+4. **Jeton Bearer** (optionnel) : identique à `SERVER_KEY`.
+5. **Tester le serveur** → « Serveur joignable et phrase secrète valide ✔ ».
 
-- Le bouton **Envoyer au serveur** (popup) pousse les visites en attente.
-- Le bouton **Envoyer tout l'historique maintenant** (options) envoie l'intégralité de l'historique du navigateur.
+- Popup → **Envoyer au serveur** : pousse les visites en attente.
+- Options → **Envoyer tout l'historique maintenant** : envoie tout l'historique du navigateur.
 
-Si l'URL du serveur est vide, **rien n'est envoyé** : tout reste dans le navigateur, consultable depuis le popup.
+Sans URL de serveur ou sans phrase secrète : **rien n'est envoyé**, tout reste en local.
 
 ---
 
-## Données collectées
+## Sécurité & confidentialité
 
-Pour chaque visite : URL, nom d'hôte, titre de la page, type (`visit` / `redirect` / `blocked`), horodatage, identifiant du navigateur.
-L'envoi « historique complet » ajoute `lastVisitTime` et `visitCount` fournis par le navigateur.
+- **Chiffrement de bout en bout** : AES-256-GCM, clé dérivée de la phrase secrète par
+  PBKDF2-SHA256 (150 000 itérations). Chaque message a son propre sel et IV aléatoires.
+  Rien ne circule en clair ; le serveur est le seul « bout » capable de déchiffrer.
+- **Serveur privé** : écoute locale + rejet de tout message non déchiffrable (la phrase
+  secrète fait office de clé d'accès) + jeton Bearer optionnel.
+- **Tag d'appareil** : chaque message porte l'étiquette de l'appareil, chiffrée.
+
+---
 
 ## Structure
 
 ```
-manifest.json          Manifest MV3
+manifest.json            Manifest MV3
+icons/                   icônes PNG + générateur
 src/
-  common.js            paramètres + utilitaires partagés
-  background.js        service worker (blocage + journal + envoi)
-  popup.html / .js     fenêtre de la barre d'outils
-  options.html / .js   réglages
-  blocked.html / .js   page affichée lors d'un blocage
+  common.js              paramètres, zones protégées, chiffrement
+  background.js          service worker (blocage ciblé + journal + envoi chiffré)
+  popup.html / .js       fenêtre de la barre d'outils
+  options.html / .js     réglages
+  blocked.html / .js     page affichée lors d'un blocage
 server/
-  server.js            serveur de collecte Node.js
+  server.js              serveur privé qui déchiffre et stocke
   package.json
 ```
 
 ## Limites connues
 
-- Sur une redirection automatique, la page cible peut commencer à se charger très brièvement avant d'être interrompue (limitation de Manifest V3, qui ne permet plus le blocage réseau synchrone aux extensions chargées manuellement).
-- La comparaison de domaines se fait par nom d'hôte (`site.com`, sous-domaines inclus en option), sans liste publique des suffixes — suffisant pour un usage personnel.
+- Sur une redirection automatique, la page cible peut clignoter brièvement avant d'être
+  coupée (Manifest V3 ne permet plus le blocage réseau synchrone aux extensions chargées
+  manuellement).
+- La comparaison de sites se fait par nom d'hôte (sous-domaines inclus en option), sans
+  liste publique des suffixes — suffisant pour un usage personnel.
