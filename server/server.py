@@ -9,7 +9,7 @@ Config : server/config.json (écrit par setup.py) ; variables d'environnement
 prioritaires : PASSPHRASE, PORT, HOST, SERVER_KEY, DATA_DIR.
 
 Le serveur ne fait que recevoir : il déchiffre (AES-256-GCM / PBKDF2) et écrit
-un fichier NDJSON par appareil. Visiter son adresse ne montre rien.
+un fichier JSON (tableau) par appareil. Visiter son adresse ne montre rien.
 """
 
 import os
@@ -231,14 +231,30 @@ def device_of(payload):
 def append_items(kind, items, meta):
     if not isinstance(items, list) or not items:
         return 0
-    path = os.path.join(DATA_DIR, safe(meta["device"]) + "." + kind + ".ndjson")
-    with open(path, "a", encoding="utf-8") as f:
-        for it in items:
-            row = dict(it)
-            row["deviceTag"] = meta.get("deviceTag") or ""
-            row["clientId"] = meta.get("clientId") or "inconnu"
-            row["receivedAt"] = int(time.time() * 1000)
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    path = os.path.join(DATA_DIR, safe(meta["device"]) + "." + kind + ".json")
+    # Fichier JSON = un tableau d'objets. On lit, on ajoute, on réécrit.
+    existing = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if not isinstance(existing, list):
+                existing = []
+        except Exception:
+            existing = []
+    now = int(time.time() * 1000)
+    for it in items:
+        row = dict(it)
+        row["deviceTag"] = meta.get("deviceTag") or ""
+        row["clientId"] = meta.get("clientId") or "inconnu"
+        row["receivedAt"] = now
+        existing.append(row)
+    # Écriture atomique (fichier temporaire puis remplacement) pour ne pas
+    # corrompre le JSON si l'écriture est interrompue.
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
     return len(items)
 
 
@@ -311,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     print("Garde-Redirections — serveur de RÉCEPTION (Python, privé, chiffré)")
-    print("  Données      : " + DATA_DIR + "  (un fichier .ndjson par appareil)")
+    print("  Données      : " + DATA_DIR + "  (un fichier .json par appareil)")
     print("  Jeton Bearer : " + ("oui" if SERVER_KEY else "non"))
     print("  Chiffrement  : AES-256-GCM (PASSPHRASE requise)")
 

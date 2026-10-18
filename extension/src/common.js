@@ -22,7 +22,7 @@ const GR_DEFAULTS = {
 
 function grGet() {
   // Ordre de priorité : valeurs par défaut < config intégrée (GR_BAKED, écrite
-  // par setup.js sur ton PC) < réglages enregistrés par l'utilisateur.
+  // par setup.py sur ton PC) < réglages enregistrés par l'utilisateur.
   const baked = (typeof self !== "undefined" && self.GR_BAKED) || {};
   return new Promise((resolve) => {
     chrome.storage.local.get(null, (v) => resolve({ ...GR_DEFAULTS, ...baked, ...v }));

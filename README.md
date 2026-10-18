@@ -10,13 +10,16 @@ Le dépôt est séparé en deux :
 
 ```
 extension/   ← l'extension seule (c'est CE dossier qu'on charge dans le navigateur)
-server/      ← serveur privé optionnel (pour recevoir les données)
-setup.js     ← configuration automatique optionnelle (relie extension + serveur)
+server/      ← serveur privé optionnel, en Python (pour recevoir les données)
+setup.py     ← configuration automatique optionnelle (relie extension + serveur)
 ```
+
+> Le serveur et les scripts sont en **Python 3.8+**, sans aucune dépendance (pas de `pip`).
+> Sous Windows, si `python` n'est pas reconnu, utilise `py` à la place.
 
 ---
 
-## Option 1 — l'extension seule (sans serveur, sans Node)
+## Option 1 — l'extension seule (sans serveur, rien à installer)
 
 C'est le plus simple. Rien à installer d'autre.
 
@@ -43,39 +46,29 @@ envoyée nulle part (tout reste en local ; tu vois le journal dans le popup).
 
 ## Option 2 — ajouter ton serveur privé (envoi chiffré)
 
-Si tu veux recevoir le journal de tes visites sur ton PC. Nécessite **Node.js** OU
-**Python 3.8+** (au choix), et (recommandé) **Tailscale**.
-
-> **Sans Node, en Python** (aucune dépendance, aucun `pip`) :
-> ```bash
-> python setup.py --watch ma-banque.fr --watch mon-autre-site.fr
-> python server/server.py
-> ```
-> Mêmes fichiers de config, même chiffrement, même stockage par appareil que la
-> version Node. Choisis l'une OU l'autre. La suite décrit la version Node ;
-> remplace `node setup.js` par `python setup.py` et `node server/server.js` par
-> `python server/server.py`.
+Si tu veux recevoir le journal de tes visites sur ton PC. Nécessite **Python 3.8+**
+(aucune dépendance) et (recommandé) **Tailscale**.
 
 ### a) Configure tout en une commande
 
 Sur ton PC, à la racine du dépôt :
 
 ```bash
-node setup.js --watch ma-banque.fr --watch mon-autre-site.fr
+python setup.py --watch voir-anime.to --watch mon-autre-site.fr
 ```
 
-`setup.js` détecte ton IP/nom Tailscale, génère une **phrase secrète** + un **jeton
+`setup.py` détecte ton IP/nom Tailscale, génère une **phrase secrète** + un **jeton
 Bearer**, écrit la config serveur (`server/config.json`) et **pré-remplit l'extension**
 (`extension/src/config.js`). Il n'y a alors rien à saisir dans les Options.
 
 ### b) Démarre le serveur
 
 ```bash
-node server/server.js
+python server/server.py
 ```
 
-Il écoute sur ton IP Tailscale (injoignable hors de ton réseau Tailscale) et n'accepte
-que les messages qu'il peut déchiffrer.
+Il écoute sur ton IP Tailscale **et** sur localhost, et n'accepte que les messages qu'il
+peut déchiffrer.
 
 ### c) (Re)charge l'extension
 
@@ -85,18 +78,18 @@ Charge le dossier `extension/` comme à l'option 1. Elle est déjà configurée.
 
 Le serveur **ne fait que recevoir** : il n'affiche aucune page. Visiter son adresse ne
 montre rien (page vide). Les données sont écrites en clair sur le disque du serveur, **un
-fichier par appareil** :
+fichier JSON par appareil** :
 
 ```
-server/data/<appareil>.visits.ndjson    ← liens visités
-server/data/<appareil>.history.ndjson   ← historique (au démarrage du navigateur)
+server/data/<appareil>.visits.json     ← liens visités (tableau JSON)
+server/data/<appareil>.history.json    ← historique (au démarrage du navigateur)
 ```
 
-Ouvre ces fichiers directement (une ligne JSON par entrée) pour consulter les données.
+Ouvre ces fichiers directement (un tableau d'objets JSON) pour consulter les données.
 
 ### Mettre l'extension sur un autre PC (et envoyer au même serveur)
 
-Sur le 2ᵉ PC, **ne lance pas `setup.js`** (il générerait de nouveaux secrets et pointerait
+Sur le 2ᵉ PC, **ne lance pas `setup.py`** (il générerait de nouveaux secrets et pointerait
 vers lui-même). À la place, donne-lui la même config que le serveur, au choix :
 
 - **Simple** : copie le fichier `extension/src/config.js` du PC serveur vers le même
@@ -105,7 +98,7 @@ vers lui-même). À la place, donne-lui la même config que le serveur, au choix
   serveur**, la même **phrase secrète** et le même **jeton** que sur le serveur.
 
 Puis change l'**étiquette d'appareil** (Options) pour un nom différent → ses données
-arriveront dans son propre fichier `<appareil>.visits.ndjson`. L'extension enverra bien au
+arriveront dans son propre fichier `<appareil>.visits.json`. L'extension enverra bien au
 PC serveur, depuis n'importe quel appareil de ton réseau Tailscale.
 
 ---
@@ -128,9 +121,9 @@ Sans phrase secrète/serveur configurés, l'extension n'envoie rien.
 ```
 extension/
   manifest.json          Manifest MV3
-  icons/                 icônes (lien barré) + générateur
+  icons/                 icônes (symbole de lien) + generate_icons.py
   src/
-    config.js            config intégrée (générée par setup.js — hors git, optionnelle)
+    config.js            config intégrée (générée par setup.py — hors git, optionnelle)
     config.example.js    modèle de config
     common.js            paramètres, zones protégées, chiffrement
     background.js        service worker (blocage ciblé + journal + envoi chiffré)
@@ -138,11 +131,14 @@ extension/
     options.html / .js   réglages
     blocked.html / .js   page affichée lors d'un blocage
 server/
-  server.js              serveur privé qui déchiffre et stocke
-  config.json            config + secrets (générée par setup.js — hors git)
-  package.json
-setup.js                 configuration automatique (Tailscale + secrets)
+  server.py              serveur privé (Python) qui déchiffre et stocke
+  config.json            config + secrets (générée par setup.py — hors git)
+setup.py                 configuration automatique (Tailscale + secrets)
 ```
+
+Tout le code serveur est en **Python pur** (AES-256-GCM / PBKDF2 réimplémentés sans
+dépendance). L'extension, elle, est en JavaScript car c'est le seul langage que les
+navigateurs exécutent pour une extension.
 
 ## Variables d'environnement du serveur (optionnelles, l'emportent sur config.json)
 

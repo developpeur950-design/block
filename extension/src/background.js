@@ -3,12 +3,12 @@
 //      courante fait partie des liens/débuts de liens configurés. Sinon : rien.
 //   2) Journalise les visites et les envoie CHIFFRÉES vers ton serveur.
 
-// config.js est écrit par setup.js et contient la config intégrée (secrets).
+// config.js est écrit par setup.py et contient la config intégrée (secrets).
 // S'il n'existe pas encore, l'extension se charge quand même et ne fait rien.
 try {
   importScripts("config.js");
 } catch (e) {
-  /* pas encore configuré : lance `node setup.js` */
+  /* pas encore configuré : lance `python setup.py` */
 }
 importScripts("common.js");
 

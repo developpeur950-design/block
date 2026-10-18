@@ -1,6 +1,6 @@
 // MODÈLE de configuration intégrée. NE PAS remplir ici.
 //
-// - Soit tu laisses faire setup.js (il crée extension/src/config.js avec tes
+// - Soit tu laisses faire setup.py (il crée extension/src/config.js avec tes
 //   secrets et l'URL de ton serveur Tailscale).
 // - Soit tu configures tout à la main dans la page Options de l'extension.
 //
