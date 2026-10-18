@@ -155,6 +155,13 @@ function readBody(req) {
   });
 }
 
+function ts() {
+  return new Date().toLocaleTimeString();
+}
+function log(...a) {
+  console.log(ts(), ...a);
+}
+
 const server = http.createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -165,6 +172,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/collect") {
     if (!authorized(req)) {
+      log("POST /collect -> 401 REFUSÉ : jeton Bearer incorrect (SERVER_KEY ≠ extension)");
       res.writeHead(401, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: false, error: "non autorisé" }));
     }
@@ -175,6 +183,7 @@ const server = http.createServer(async (req, res) => {
         payload = await decryptEnvelope(envelope); // verrou de confidentialité
       } catch {
         // Déchiffrement impossible = mauvaise phrase secrète ou intrus : on rejette.
+        log("POST /collect -> 400 REFUSÉ : déchiffrement impossible (phrase secrète ≠ extension)");
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ ok: false, error: "déchiffrement impossible" }));
       }
@@ -183,17 +192,19 @@ const server = http.createServer(async (req, res) => {
       let saved = 0;
       if (payload.kind === "visits") saved = appendItems(visitsFile(device), payload.items, meta);
       else if (payload.kind === "history") saved = appendItems(historyFile(device), payload.items, meta);
+      log(`POST /collect -> OK  ${payload.kind}  appareil="${device}"  (+${saved} enregistré${saved > 1 ? "s" : ""})`);
       // "ping" : rien à stocker, mais le déchiffrement a réussi => clé OK.
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: true, kind: payload.kind, saved }));
     } catch (e) {
+      log("POST /collect -> 400 ERREUR :", String(e.message || e));
       res.writeHead(400, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
     }
   }
 
   // Réception uniquement : aucune autre route. On ne montre/renvoie rien.
-  // (page vide pour un visiteur qui tomberait sur l'adresse du serveur)
+  log(req.method + " " + url.pathname + " -> 404 (le serveur ne fait que recevoir)");
   res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
   res.end();
 });
