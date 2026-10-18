@@ -18,8 +18,9 @@ let anchors = {};
 let bypass = {};
 // Nouveaux onglets ouverts depuis une zone protégée à surveiller : { [tabId]: baseHost }.
 let spawnedGuard = {};
-// Garde pour éviter deux envois simultanés.
+// Garde pour éviter deux envois simultanés (+ relance si des liens arrivent pendant).
 let syncing = false;
+let pendingAgain = false;
 
 chrome.storage.session.get(["anchors"], (v) => {
   anchors = v.anchors || {};
@@ -158,8 +159,10 @@ async function logVisit(d, settings, type) {
   while (log.length > settings.maxLog) log.shift();
   await grSet({ visitLog: log });
 
-  // Envoi immédiat à chaque nouveau lien (si un serveur est configuré).
-  if (settings.serverUrl && settings.passphrase) syncNow();
+  // Envoi immédiat à chaque nouveau lien. On ATTEND l'envoi : sans ça, le
+  // service worker MV3 peut se mettre en veille et annuler la requête en cours
+  // (les liens ne partaient alors qu'occasionnellement).
+  if (settings.serverUrl && settings.passphrase) await syncNow();
 }
 
 // ------------------------------------------------------------------
@@ -193,21 +196,31 @@ async function postToServer(kind, items, settings) {
 }
 
 async function syncNow() {
-  const settings = await grGet();
-  if (!settings.serverUrl) return { ok: false, reason: "aucun serveur configuré" };
-  if (!settings.passphrase) return { ok: false, reason: "phrase secrète manquante" };
-  if (syncing) return { ok: false, reason: "busy" };
+  // Un seul envoi à la fois ; si des liens arrivent pendant l'envoi, on
+  // repasse une fois de plus pour ne jamais en laisser en attente.
+  if (syncing) {
+    pendingAgain = true;
+    return { ok: true, queued: true };
+  }
   syncing = true;
+  let total = 0;
   try {
-    const data = await grGet();
-    const log = data.visitLog || [];
-    const unsent = log.filter((e) => !e.sent);
-    if (unsent.length === 0) return { ok: true, sent: 0 };
-    await postToServer("visits", unsent, settings);
-    const sentSet = new Set(unsent.map((e) => e.ts + "|" + e.url));
-    for (const e of log) if (sentSet.has(e.ts + "|" + e.url)) e.sent = true;
-    await grSet({ visitLog: log });
-    return { ok: true, sent: unsent.length };
+    const settings = await grGet();
+    if (!settings.serverUrl) return { ok: false, reason: "aucun serveur configuré" };
+    if (!settings.passphrase) return { ok: false, reason: "phrase secrète manquante" };
+    do {
+      pendingAgain = false;
+      const data = await grGet();
+      const log = data.visitLog || [];
+      const unsent = log.filter((e) => !e.sent);
+      if (unsent.length === 0) break;
+      await postToServer("visits", unsent, settings);
+      const sentSet = new Set(unsent.map((e) => e.ts + "|" + e.url));
+      for (const e of log) if (sentSet.has(e.ts + "|" + e.url)) e.sent = true;
+      await grSet({ visitLog: log });
+      total += unsent.length;
+    } while (pendingAgain);
+    return { ok: true, sent: total };
   } catch (err) {
     return { ok: false, reason: String(err && err.message ? err.message : err) };
   } finally {
