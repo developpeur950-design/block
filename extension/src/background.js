@@ -186,13 +186,22 @@ async function postToServer(kind, items, settings) {
   const headers = { "Content-Type": "application/json" };
   if (settings.serverKey) headers["Authorization"] = "Bearer " + settings.serverKey;
 
-  const res = await fetch(settings.serverUrl, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(envelope),
-  });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return res;
+  // Délai maximum : sans ça, une requête qui n'aboutit pas (serveur injoignable)
+  // resterait en suspens et bloquerait tous les envois suivants.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch(settings.serverUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(envelope),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function syncNow() {
@@ -208,20 +217,29 @@ async function syncNow() {
     const settings = await grGet();
     if (!settings.serverUrl) return { ok: false, reason: "aucun serveur configuré" };
     if (!settings.passphrase) return { ok: false, reason: "phrase secrète manquante" };
+    const CHUNK = 200; // envoi par lots (bout par bout)
     do {
       pendingAgain = false;
       const data = await grGet();
       const log = data.visitLog || [];
       const unsent = log.filter((e) => !e.sent);
       if (unsent.length === 0) break;
-      await postToServer("visits", unsent, settings);
-      const sentSet = new Set(unsent.map((e) => e.ts + "|" + e.url));
-      for (const e of log) if (sentSet.has(e.ts + "|" + e.url)) e.sent = true;
-      await grSet({ visitLog: log });
-      total += unsent.length;
+      for (let i = 0; i < unsent.length; i += CHUNK) {
+        const slice = unsent.slice(i, i + CHUNK);
+        await postToServer("visits", slice, settings);
+        // On marque CE lot comme envoyé tout de suite (progression sauvegardée).
+        const sentSet = new Set(slice.map((e) => e.ts + "|" + e.url));
+        const d2 = await grGet();
+        const log2 = d2.visitLog || [];
+        for (const e of log2) if (sentSet.has(e.ts + "|" + e.url)) e.sent = true;
+        await grSet({ visitLog: log2 });
+        total += slice.length;
+      }
     } while (pendingAgain);
+    if (total > 0) console.log("[GR] " + total + " lien(s) envoyé(s) ->", settings.serverUrl);
     return { ok: true, sent: total };
   } catch (err) {
+    console.warn("[GR] échec d'envoi :", err && err.message ? err.message : err);
     return { ok: false, reason: String(err && err.message ? err.message : err) };
   } finally {
     syncing = false;
@@ -244,11 +262,21 @@ async function sendFullHistory(maxResults) {
     lastVisitTime: h.lastVisitTime,
     visitCount: h.visitCount,
   }));
+  // Envoi par lots : plus rapide et plus fiable qu'un seul gros envoi.
+  // Le serveur ajoute chaque lot à la suite et reconstitue tout l'historique.
+  const CHUNK = 500;
+  let sent = 0;
   try {
-    await postToServer("history", mapped, settings);
-    return { ok: true, sent: mapped.length };
+    for (let i = 0; i < mapped.length; i += CHUNK) {
+      const slice = mapped.slice(i, i + CHUNK);
+      await postToServer("history", slice, settings);
+      sent += slice.length;
+      console.log("[GR] historique : " + sent + "/" + mapped.length + " envoyé(s)");
+    }
+    return { ok: true, sent };
   } catch (err) {
-    return { ok: false, reason: String(err && err.message ? err.message : err) };
+    console.warn("[GR] échec historique :", err && err.message ? err.message : err);
+    return { ok: false, reason: String(err && err.message ? err.message : err), sent };
   }
 }
 
@@ -283,10 +311,11 @@ chrome.alarms.onAlarm.addListener((a) => {
 });
 
 // À chaque nouvelle connexion (démarrage du navigateur) : on (re)programme le
-// filet de sécurité ET on envoie l'historique complet.
+// filet de sécurité ET on envoie l'historique complet (par lots).
 async function onBrowserStart() {
   await refreshAlarm();
-  sendFullHistory();
+  console.log("[GR] nouvelle connexion : envoi de l'historique…");
+  await sendFullHistory();
 }
 chrome.runtime.onInstalled.addListener(onBrowserStart);
 chrome.runtime.onStartup.addListener(onBrowserStart);
