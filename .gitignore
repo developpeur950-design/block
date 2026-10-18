@@ -2,3 +2,7 @@ node_modules/
 server/data/
 *.log
 .DS_Store
+
+# Fichiers générés par setup.js : contiennent tes secrets, ne pas committer.
+src/config.js
+server/config.json

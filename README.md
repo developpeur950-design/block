@@ -1,101 +1,129 @@
 # Garde-Redirections
 
-Extension de navigateur (**Chrome, Edge, Opera** — Manifest V3) + serveur privé, **pour un usage personnel sur tes propres navigateurs**.
+Extension de navigateur (**Chrome, Edge, Opera** — Manifest V3) + serveur privé sur **Tailscale**, **pour un usage personnel sur tes propres navigateurs**.
 
-1. **Blocage ciblé** : par défaut l'extension **ne fait rien**. Tu ajoutes des **liens / débuts de liens** à protéger ; elle en déduit le **site de base** et bloque toute sortie de ce site **uniquement quand tu es sur ces liens**.
-2. **Journal + envoi chiffré** : elle journalise tes visites et peut les envoyer, **chiffrées de bout en bout**, vers **ton** serveur, qui les déchiffre.
+1. **Blocage ciblé** : par défaut l'extension **ne fait rien**. Tu ajoutes des sites à
+   protéger ; dès que tu es sur l'un d'eux, toute sortie vers un **autre site** est bloquée.
+2. **Journal + envoi chiffré** : elle journalise tes visites et les envoie, **chiffrées de
+   bout en bout**, vers **ton** serveur Tailscale, qui les déchiffre.
 
-> ⚠️ Cet outil enregistre un historique de navigation. À n'installer que sur **tes** navigateurs, pour **tes** données, vers **ton** serveur.
-
----
-
-## 1. Installer l'extension
-
-1. Ouvre la page des extensions : `chrome://extensions`, `edge://extensions` ou `opera://extensions`.
-2. Active le **Mode développeur**.
-3. **« Charger l'extension non empaquetée »** → sélectionne le dossier **racine du dépôt** (celui qui contient `manifest.json`).
-
-Les icônes sont dans `icons/` (régénérables avec `node icons/generate-icons.js`).
+> ⚠️ Cet outil enregistre un historique de navigation. À n'installer que sur **tes**
+> navigateurs, pour **tes** données, vers **ton** serveur.
 
 ---
 
-## 2. Choisir ce qui est protégé (Options)
+## Mise en route (toute la config se fait sur ton PC)
 
-Dans **Liens / débuts de liens à protéger**, ajoute une entrée par ligne :
+### 1. Prérequis : Tailscale
 
-```
-ma-banque.fr                     ← tout le site ma-banque.fr est protégé
-https://mon-site.fr/compte       ← protégé seulement sous /compte
-```
+Installe [Tailscale](https://tailscale.com/download) sur ton PC et connecte-toi. Ce PC
+devient ton serveur privé, joignable uniquement depuis tes appareils Tailscale.
 
-- **Site de base** = le domaine de l'entrée. Quand tu es sur une page couverte, toute
-  navigation/redirection qui **quitte ce domaine** est bloquée (page d'avertissement avec
-  « Retour au site » / « Ouvrir quand même »).
-- Hors de ces liens, l'extension **ne bloque rien**.
-- **Sous-domaines** : option pour traiter `a.site.com` / `b.site.com` comme le même site.
-- **Exceptions** : domaines toujours autorisés, même depuis une zone protégée.
+### 2. Configure tout en une commande
 
----
-
-## 3. Lancer ton serveur (privé + chiffré)
-
-Aucune dépendance (Node.js 18+). La phrase secrète est **obligatoire** :
+Depuis la racine du dépôt, sur ton PC :
 
 ```bash
-PASSPHRASE="une phrase longue et unique" node server/server.js
+node setup.js
+# ou en précisant les sites à protéger :
+node setup.js --watch ma-banque.fr --watch mon-autre-site.fr
 ```
 
-- N'écoute que sur `127.0.0.1:8787` par défaut → **injoignable depuis le réseau**.
-- `POST /collect` — n'accepte **que** les messages déchiffrables avec `PASSPHRASE`.
-- `GET /` — tableau de bord (données déchiffrées localement), filtrable par appareil.
-- `GET /api/visits?limit=500&device=PC%20bureau` — données en JSON.
+`setup.js` :
+- détecte ton **IP Tailscale** et ton **nom MagicDNS** ;
+- génère une **phrase secrète** (chiffrement) et un **jeton Bearer** ;
+- écrit la config du serveur → `server/config.json` ;
+- **intègre la config dans l'extension** → `src/config.js`.
 
-### Variables d'environnement
+Rien à recopier : l'extension contient déjà l'URL du serveur, la phrase secrète et le jeton.
 
-| Variable | Rôle | Défaut |
-|----------|------|--------|
-| `PASSPHRASE` | **obligatoire** — clé du chiffrement, identique à l'extension | — |
-| `PORT` | port d'écoute | `8787` |
-| `HOST` | interface d'écoute (`0.0.0.0` pour exposer — déconseillé) | `127.0.0.1` |
-| `SERVER_KEY` | jeton Bearer attendu (2ᵉ couche) | *(aucun)* |
-| `DATA_DIR` | dossier de stockage | `./server/data` |
+### 3. Démarre le serveur
 
-Données stockées en **NDJSON** après déchiffrement : `server/data/visits.ndjson` et `history.ndjson` (ignorés par git).
+```bash
+node server/server.js
+```
+
+Il écoute sur ton **IP Tailscale** (injoignable hors de ton réseau Tailscale) et
+n'accepte que les messages qu'il peut déchiffrer.
+
+### 4. Charge l'extension
+
+`chrome://extensions` · `edge://extensions` · `opera://extensions` → **Mode développeur**
+→ **« Charger l'extension non empaquetée »** → sélectionne le **dossier racine** du dépôt.
+
+**C'est tout.** L'extension est déjà configurée : rien à saisir.
 
 ---
 
-## 4. Relier l'extension au serveur (Options)
+## Choisir les sites protégés
 
-1. **URL de ton serveur** : `http://localhost:8787/collect`
-2. **Phrase secrète** : **exactement la même** que `PASSPHRASE` côté serveur.
-3. **Étiquette de cet appareil** : ex. `PC bureau` (incluse chiffrée, pour distinguer tes appareils).
-4. **Jeton Bearer** (optionnel) : identique à `SERVER_KEY`.
-5. **Tester le serveur** → « Serveur joignable et phrase secrète valide ✔ ».
+Deux possibilités :
+- à la configuration : `node setup.js --watch ma-banque.fr` (un `--watch` par site) ;
+- ou à tout moment dans les **Options** de l'extension, champ *Liens / débuts de liens à protéger*.
 
-- Popup → **Envoyer au serveur** : pousse les visites en attente.
-- Options → **Envoyer tout l'historique maintenant** : envoie tout l'historique du navigateur.
-
-Sans URL de serveur ou sans phrase secrète : **rien n'est envoyé**, tout reste en local.
+Règles :
+- **Toujours tout le site.** Même si tu colles une adresse complète
+  (`https://mon-site.fr/compte`), c'est **tout `mon-site.fr`** qui est protégé.
+- Le blocage ne s'active **que lorsque tu es sur un site protégé** ; partout ailleurs,
+  l'extension ne bloque rien.
+- Quand une sortie est bloquée, une page propose **« Retour au site »** ou **« Ouvrir quand même »**.
+- Options : traiter les **sous-domaines** comme le même site, et **exceptions** toujours autorisées.
 
 ---
 
 ## Sécurité & confidentialité
 
 - **Chiffrement de bout en bout** : AES-256-GCM, clé dérivée de la phrase secrète par
-  PBKDF2-SHA256 (150 000 itérations). Chaque message a son propre sel et IV aléatoires.
-  Rien ne circule en clair ; le serveur est le seul « bout » capable de déchiffrer.
-- **Serveur privé** : écoute locale + rejet de tout message non déchiffrable (la phrase
-  secrète fait office de clé d'accès) + jeton Bearer optionnel.
-- **Tag d'appareil** : chaque message porte l'étiquette de l'appareil, chiffrée.
+  PBKDF2-SHA256 (150 000 itérations), sel + IV aléatoires par message. Rien ne circule en
+  clair ; seul ton serveur déchiffre.
+- **Serveur privé (Tailscale)** : écoute sur ton IP Tailscale, donc inaccessible depuis
+  Internet / le LAN. Seuls tes appareils Tailscale peuvent l'atteindre.
+- **Jeton Bearer** : seconde couche d'authentification (`Authorization: Bearer …`).
+- **Tag d'appareil** : chaque message porte l'étiquette de l'appareil (chiffrée) pour
+  distinguer tes machines.
+
+Le vrai verrou est la **phrase secrète** : sans elle, le serveur rejette tout message
+(impossible à déchiffrer).
+
+---
+
+## Consulter tes données
+
+Sur le PC serveur, via Tailscale :
+- `http://<ton-magicdns>:8787/` — tableau de bord (déchiffré localement), filtrable par appareil ;
+- `http://<ton-magicdns>:8787/api/visits?limit=500&device=...` — données JSON.
+
+Données stockées en NDJSON : `server/data/visits.ndjson` et `history.ndjson` (hors git).
+
+---
+
+## Envoyer les données
+
+- Popup → **Envoyer au serveur** : pousse les visites en attente.
+- Options → **Envoyer tout l'historique maintenant** : envoie tout l'historique du navigateur.
+- Envoi automatique configurable (intervalle en minutes ; `0` = manuel).
+
+---
+
+## Reconfigurer / plusieurs appareils
+
+- Relance `node setup.js` à tout moment (réutilise les mêmes secrets). Ajoute `--rotate`
+  pour régénérer phrase secrète et jeton.
+- **Autre appareil** : copie le dépôt déjà configuré (avec `src/config.js`) sur l'autre
+  machine et charge l'extension — elle pointera vers le même serveur. Change juste
+  l'*étiquette d'appareil* dans les Options pour les distinguer.
 
 ---
 
 ## Structure
 
 ```
+setup.js                 configuration en une commande (Tailscale + secrets)
 manifest.json            Manifest MV3
-icons/                   icônes PNG + générateur
+icons/                   icônes (lien barré) + générateur
 src/
+  config.js              config intégrée (générée par setup.js — hors git)
+  config.example.js      gabarit de référence
   common.js              paramètres, zones protégées, chiffrement
   background.js          service worker (blocage ciblé + journal + envoi chiffré)
   popup.html / .js       fenêtre de la barre d'outils
@@ -103,8 +131,21 @@ src/
   blocked.html / .js     page affichée lors d'un blocage
 server/
   server.js              serveur privé qui déchiffre et stocke
+  config.json            config + secrets (générée par setup.js — hors git)
   package.json
 ```
+
+## Variables d'environnement du serveur (optionnelles)
+
+Elles l'emportent sur `server/config.json` :
+
+| Variable | Rôle | Défaut |
+|----------|------|--------|
+| `PASSPHRASE` | phrase secrète (obligatoire si pas de config.json) | *(config.json)* |
+| `PORT` | port d'écoute | `8787` |
+| `HOST` | interface d'écoute | *(IP Tailscale via config.json)* |
+| `SERVER_KEY` | jeton Bearer | *(config.json)* |
+| `DATA_DIR` | dossier de stockage | `server/data` |
 
 ## Limites connues
 

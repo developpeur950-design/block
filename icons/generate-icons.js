@@ -58,12 +58,19 @@ function inRoundRect(x, y) {
   return dx * dx + dy * dy <= r * r;
 }
 function isMark(x, y) {
-  // anneau + barre diagonale = panneau d'interdiction
+  // Maillon de chaîne (capsule évidée) + barre diagonale = lien barré.
   const dx = x - 0.5, dy = y - 0.5;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  const ring = d > 0.23 && d < 0.34;
-  const bar = d < 0.34 && Math.abs(dx - dy) / Math.SQRT2 < 0.055;
-  return ring || bar;
+  // Repère tourné à 45° : u le long de la diagonale, v perpendiculaire.
+  const u = (dx + dy) / Math.SQRT2;
+  const v = (dx - dy) / Math.SQRT2;
+  // Contour d'une capsule allongée le long de u (= un maillon de lien).
+  const L = 0.11, R = 0.12, TH = 0.034;
+  const cu = Math.max(-L, Math.min(L, u));
+  const dSeg = Math.sqrt((u - cu) * (u - cu) + v * v);
+  const link = Math.abs(dSeg - R) < TH;
+  // Barre diagonale (slash) traversant le maillon sur l'autre diagonale.
+  const slash = Math.abs(u) < 0.032 && Math.abs(v) < 0.3;
+  return link || slash;
 }
 function render(size) {
   const S = 4; // suréchantillonnage

@@ -21,8 +21,11 @@ const GR_DEFAULTS = {
 };
 
 function grGet() {
+  // Ordre de priorité : valeurs par défaut < config intégrée (GR_BAKED, écrite
+  // par setup.js sur ton PC) < réglages enregistrés par l'utilisateur.
+  const baked = (typeof self !== "undefined" && self.GR_BAKED) || {};
   return new Promise((resolve) => {
-    chrome.storage.local.get(null, (v) => resolve({ ...GR_DEFAULTS, ...v }));
+    chrome.storage.local.get(null, (v) => resolve({ ...GR_DEFAULTS, ...baked, ...v }));
   });
 }
 
@@ -54,14 +57,15 @@ function grHost(url) {
 // ("ma-banque.fr"), soit un début de lien ("https://ma-banque.fr/compte").
 
 function grParseZone(entry) {
+  // On ne retient QUE le site de base (host). Un éventuel chemin collé
+  // (https://mon-site.fr/compte) est ignoré : c'est tout le site qui est protégé.
   let e = (entry || "").trim();
   if (!e) return null;
   let rest = e.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
   const slash = rest.indexOf("/");
   const host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase();
-  const pathPrefix = slash === -1 ? "" : rest.slice(slash); // commence par "/"
   if (!host) return null;
-  return { raw: e, host, pathPrefix };
+  return { raw: e, host };
 }
 
 function grUrlParts(url) {
@@ -77,15 +81,14 @@ function grUrlParts(url) {
 }
 
 // La page "url" fait-elle partie de la zone décrite par "zone" ?
+// (comparaison uniquement sur le site de base, chemin ignoré)
 function grMatchZone(url, zone, settings) {
   const p = grUrlParts(url);
   if (!p || !zone) return false;
-  const hostOk =
+  return (
     p.host === zone.host ||
-    (settings.includeSubdomains && p.host.endsWith("." + zone.host));
-  if (!hostOk) return false;
-  if (!zone.pathPrefix || zone.pathPrefix === "/") return true;
-  return p.path.startsWith(zone.pathPrefix);
+    (settings.includeSubdomains && p.host.endsWith("." + zone.host))
+  );
 }
 
 // Renvoie la zone qui contient cette URL, ou null.

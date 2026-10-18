@@ -22,16 +22,28 @@ const fs = require("fs");
 const path = require("path");
 const { subtle } = globalThis.crypto;
 
-const PORT = parseInt(process.env.PORT, 10) || 8787;
-const HOST = process.env.HOST || "127.0.0.1";
-const SERVER_KEY = process.env.SERVER_KEY || "";
-const PASSPHRASE = process.env.PASSPHRASE || "";
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+// Configuration écrite par setup.js (server/config.json) sur ton PC.
+// Les variables d'environnement, si présentes, l'emportent.
+let cfg = {};
+try {
+  cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
+} catch {}
+
+const PORT = parseInt(process.env.PORT, 10) || cfg.port || 8787;
+const HOST = process.env.HOST || cfg.host || "127.0.0.1";
+const SERVER_KEY = process.env.SERVER_KEY || cfg.serverKey || "";
+const PASSPHRASE = process.env.PASSPHRASE || cfg.passphrase || "";
+const DATA_DIR = process.env.DATA_DIR
+  ? process.env.DATA_DIR
+  : cfg.dataDir
+  ? path.resolve(__dirname, cfg.dataDir)
+  : path.join(__dirname, "data");
 
 if (!PASSPHRASE) {
   console.error(
-    "ERREUR : la variable PASSPHRASE est obligatoire (la même que dans l'extension).\n" +
-      'Exemple : PASSPHRASE="ma phrase secrète" node server/server.js'
+    "ERREUR : aucune phrase secrète.\n" +
+      "Lance d'abord la configuration sur ton PC :  node setup.js\n" +
+      'Ou fournis-la à la main :  PASSPHRASE="ma phrase secrète" node server/server.js'
   );
   process.exit(1);
 }
