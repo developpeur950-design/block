@@ -104,7 +104,7 @@ fs.writeFileSync(serverCfgPath, JSON.stringify(serverCfg, null, 2) + "\n");
 
 // --- écriture extension ---------------------------------------------
 const extCfg = { serverUrl, passphrase, serverKey, deviceTag, watchedLinks: WATCH };
-const extCfgPath = path.join(__dirname, "src", "config.js");
+const extCfgPath = path.join(__dirname, "extension", "src", "config.js");
 const extContent =
   "// Configuration INTÉGRÉE à l'extension — écrite par setup.js le " +
   new Date().toISOString() +

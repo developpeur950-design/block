@@ -3,6 +3,6 @@ server/data/
 *.log
 .DS_Store
 
-# Fichiers générés par setup.js : contiennent tes secrets, ne pas committer.
-src/config.js
+# Fichiers générés par setup.js (contiennent tes secrets) : ne pas committer.
+extension/src/config.js
 server/config.json
