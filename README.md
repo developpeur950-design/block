@@ -43,8 +43,18 @@ envoyée nulle part (tout reste en local ; tu vois le journal dans le popup).
 
 ## Option 2 — ajouter ton serveur privé (envoi chiffré)
 
-Si tu veux recevoir le journal de tes visites sur ton PC. Nécessite **Node.js** et
-(recommandé) **Tailscale**.
+Si tu veux recevoir le journal de tes visites sur ton PC. Nécessite **Node.js** OU
+**Python 3.8+** (au choix), et (recommandé) **Tailscale**.
+
+> **Sans Node, en Python** (aucune dépendance, aucun `pip`) :
+> ```bash
+> python setup.py --watch ma-banque.fr --watch mon-autre-site.fr
+> python server/server.py
+> ```
+> Mêmes fichiers de config, même chiffrement, même stockage par appareil que la
+> version Node. Choisis l'une OU l'autre. La suite décrit la version Node ;
+> remplace `node setup.js` par `python setup.py` et `node server/server.js` par
+> `python server/server.py`.
 
 ### a) Configure tout en une commande
 
